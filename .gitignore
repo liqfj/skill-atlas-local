@@ -1,0 +1,11 @@
+node_modules/
+data/
+*.log
+.env
+.env.*
+*.local.json
+*.tgz
+artifacts/
+coverage/
+.DS_Store
+Thumbs.db

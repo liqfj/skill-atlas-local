@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Skill Atlas · 本地技能目录</title>
+  <link rel="icon" href="/assets/catalog-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="/vendor/lucide.js"></script>
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <button class="nav-scrim" id="navScrim" aria-label="关闭导航" hidden></button>
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="/" aria-label="Skill Atlas 首页">
+      <span class="brand-mark"><i data-lucide="library-big"></i></span>
+      <span><strong>Skill Atlas<span class="brand-dot">.</span></strong><small>LOCAL COLLECTION</small></span>
+    </a>
+    <div class="workspace-label"><span class="workspace-avatar"><i data-lucide="user-round"></i></span><span>我的技能库<small>Personal workspace</small></span><i data-lucide="lock-keyhole"></i></div>
+    <div class="sidebar-scroll">
+    <nav aria-label="主要导航" class="main-nav">
+      <button class="nav-item active" data-view="library" aria-current="page"><i data-lucide="library"></i><span>技能目录</span><span class="nav-count" id="navTotal">—</span></button>
+      <button class="nav-item" data-view="packages"><i data-lucide="package"></i><span>技能包</span><span class="nav-count" id="navPackages">—</span></button>
+      <button class="nav-item" data-view="history"><i data-lucide="history"></i><span>变化记录</span><span class="nav-count" id="navChanges">—</span></button>
+      <button class="nav-item" data-view="sources"><i data-lucide="folder-open"></i><span>来源目录</span><span class="nav-count" id="navSources">—</span></button>
+      <button class="nav-item" data-view="categories"><i data-lucide="tags"></i><span>分类管理</span><span class="nav-count" id="navCategories">—</span></button>
+    </nav>
+    <div class="nav-section-label">技能包集合</div>
+    <nav id="packageNav" class="category-nav package-nav" aria-label="技能包集合"></nav>
+    <div class="nav-section-label">按用途浏览</div>
+    <nav id="categoryNav" class="category-nav" aria-label="技能分类"></nav>
+    </div>
+    <div class="sidebar-bottom">
+      <span class="local-indicator"><span class="status-dot"></span>本机 · 只读扫描</span>
+      <div class="sidebar-version"><span>Skill Atlas</span><span>v0.1</span></div>
+    </div>
+  </aside>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="breadcrumbs"><button id="menuToggle" class="icon-button menu-toggle" aria-label="展开导航" aria-expanded="false"><i data-lucide="panel-left"></i></button><span class="breadcrumb-root">个人工作台</span><i data-lucide="chevron-right" class="breadcrumb-arrow"></i><span id="breadcrumbCurrent">技能目录</span></div>
+      <div class="topbar-end"><span class="connection-status" id="connectionStatus"><span class="status-dot"></span><span>连接中</span></span><span class="local-avatar" title="本地工作区"><i data-lucide="laptop-minimal"></i></span></div>
+    </header>
+    <main>
+      <div class="connection-error" id="connectionError" role="alert" hidden><i data-lucide="wifi-off"></i><span>无法连接本地服务</span><button id="retryConnection" class="text-button">重试</button></div>
+      <section class="page-heading">
+        <div><div class="eyebrow" id="pageEyebrow">YOUR LOCAL TOOLKIT</div><h1 id="pageTitle">技能目录</h1><p class="heading-meta" id="pageMeta">正在读取本地目录…</p></div>
+        <div class="heading-actions"><a href="/api/export" download="skill-atlas.json" class="icon-button export-button" title="导出目录 JSON" aria-label="导出目录 JSON"><i data-lucide="download"></i></a><button id="scanButton" class="button button-primary"><i data-lucide="refresh-cw" id="scanIcon"></i><span id="scanLabel">扫描更新</span></button></div>
+      </section>
+      <section class="metrics" id="catalogMetrics" aria-label="技能库概况">
+        <button class="metric" data-quick="packages"><span class="metric-label"><i data-lucide="package"></i>技能包</span><span class="metric-bottom"><strong id="metricPackages">—</strong><span class="metric-unit">个</span><span class="metric-accent accent-green">整体管理</span></span></button>
+        <button class="metric" data-quick="standalone"><span class="metric-label"><i data-lucide="file-code-2"></i>独立技能</span><span class="metric-bottom"><strong id="metricStandalone">—</strong><span class="metric-unit">个</span><span class="metric-accent accent-gold">未归包</span></span></button>
+        <button class="metric" data-quick="packages"><span class="metric-label"><i data-lucide="folder-tree"></i>包内入口</span><span class="metric-bottom"><strong id="metricMembers">—</strong><span class="metric-unit">个</span><span class="metric-accent accent-blue">含主入口</span></span></button>
+        <button class="metric" data-quick="all"><span class="metric-label"><i data-lucide="layers-2"></i>全部入口</span><span class="metric-bottom"><strong id="metricEntries">—</strong><span class="metric-unit">个</span><span class="metric-accent accent-neutral">磁盘存在</span></span></button>
+      </section>
+      <section id="libraryView" class="view-section">
+        <div class="filter-bar">
+          <label class="search-box"><i data-lucide="search"></i><input type="search" id="searchInput" placeholder="搜索名称、用途或关键词" autocomplete="off" aria-label="搜索技能"><button id="clearSearch" class="clear-search icon-button" aria-label="清除搜索" hidden><i data-lucide="x"></i></button></label>
+          <div class="filter-selects"><select id="sourceFilter" aria-label="筛选来源"><option value="">全部来源</option></select><select id="statusFilter" aria-label="筛选状态"><option value="">全部状态</option><option value="present">磁盘存在</option><option value="missing">路径缺失</option><option value="unknown">待确认</option><option value="issues">需整理</option><option value="duplicates">同名副本</option><option value="manual">人工分类</option><option value="pending">待重分类</option><option value="zh-missing">待补中文</option><option value="zh-stale">中文待复核</option></select><select id="sortSelect" aria-label="排序方式"><option value="name">名称排序</option><option value="firstSeen">最近发现</option><option value="changedAt">最近变化</option></select></div>
+        </div>
+        <div class="list-heading"><div><h2 id="listTitle">全部目录项</h2><span id="resultCount" class="result-count">—</span><button class="filter-chip" id="recentChip" hidden>近 7 天<i data-lucide="x"></i></button></div><div class="kind-control" aria-label="目录类型"><button data-kind="" class="active" aria-pressed="true">全部</button><button data-kind="package" aria-pressed="false">技能包</button><button data-kind="skill" aria-pressed="false">独立技能</button></div><span class="scan-stamp" id="scanStamp">尚未扫描</span></div>
+        <div class="skill-table" id="skillTable"><div class="loading-state"><span class="loading-line"></span><span class="loading-line"></span><span class="loading-line"></span></div></div>
+        <div id="pagination" class="pagination"></div>
+      </section>
+      <section id="historyView" class="view-section" hidden>
+        <div class="section-toolbar"><div class="section-title"><i data-lucide="history"></i><h2>目录历史</h2><span class="result-count" id="historyCount"></span></div><select id="eventFilter" aria-label="筛选变化类型"><option value="">全部变化</option><option value="added">新增发现</option><option value="updated">内容更新</option><option value="missing">路径缺失</option><option value="restored">重新发现</option><option value="classified">分类调整</option><option value="packaged">包归属调整</option></select></div>
+        <div id="historyList"></div>
+        <div id="historyMore" class="history-more"></div>
+      </section>
+      <section id="sourcesView" class="view-section" hidden>
+        <div class="section-toolbar"><div class="section-title"><i data-lucide="folder-tree"></i><h2>扫描来源</h2></div><button id="addSourceButton" class="button button-primary"><i data-lucide="folder-plus"></i>添加目录</button></div>
+        <div class="source-grid" id="sourceList"></div>
+        <div class="scan-settings"><div><strong>定时扫描</strong><span>5 分钟</span></div><label class="switch"><input type="checkbox" id="autoScanToggle" aria-label="定时扫描"><span class="switch-track"></span></label></div>
+        <div id="candidateSection" hidden><div class="section-toolbar"><div class="section-title"><i data-lucide="scan-search"></i><h2>其他已发现目录</h2></div></div><div id="candidateList"></div></div>
+      </section>
+      <section id="categoriesView" class="view-section" hidden>
+        <div class="section-toolbar category-toolbar"><div class="section-title"><i data-lucide="tags"></i><h2>用途分类</h2></div><div class="toolbar-actions"><button id="previewReclassifyButton" class="button button-secondary"><i data-lucide="list-restart"></i>预览重分类</button><button id="addCategoryButton" class="button button-primary"><i data-lucide="plus"></i>新增分类</button></div></div>
+        <div id="categoryStats" class="management-stats"></div>
+        <div id="categoryList" class="category-list"></div>
+      </section>
+      <section id="packagesView" class="view-section" hidden>
+        <div class="section-toolbar"><div class="section-title"><i data-lucide="package"></i><h2>已确认技能包</h2></div><button id="createPackageButton" class="button button-primary"><i data-lucide="plus"></i>手工组包</button></div>
+        <div id="packageList"></div>
+        <section id="packageCandidatesSection" hidden><div class="section-toolbar"><div class="section-title"><i data-lucide="scan-search"></i><h2>待确认分组</h2><span id="packageCandidateCount" class="result-count"></span></div></div><div id="packageCandidateList"></div></section>
+      </section>
+      <section id="packageView" class="view-section" hidden>
+        <div class="section-toolbar"><button class="button button-secondary" data-view="library"><i data-lucide="arrow-left"></i>返回目录</button><div class="toolbar-actions"><button id="editPackageButton" class="icon-button" title="编辑技能包" aria-label="编辑技能包"><i data-lucide="pencil"></i></button><button id="ungroupPackageButton" class="icon-button" title="解除分组" aria-label="解除分组"><i data-lucide="unlink"></i></button></div></div>
+        <div class="package-profile"><div><div id="packageBadges" class="detail-badges"></div><p id="packageDescription" class="package-description"></p><div id="packageLocations" class="package-locations"></div></div><div class="package-classification"><label for="packageCategory">整包用途分类</label><form id="packageCategoryForm" class="classification-form"><select id="packageCategory" aria-label="整包用途分类"></select><button id="savePackageCategory" type="submit" class="icon-button" title="应用整包分类" aria-label="应用整包分类"><i data-lucide="check"></i></button></form><p id="packageCategoryState" class="editor-status"></p><button id="packageMainEntry" class="button button-secondary" hidden><i data-lucide="file-code-2"></i>主入口详情</button></div></div>
+        <div class="section-toolbar member-toolbar"><div class="section-title"><i data-lucide="folder-tree"></i><h2>入口与成员</h2><span id="packageMemberCount" class="result-count"></span></div><label class="search-box"><i data-lucide="search"></i><input type="search" id="memberSearch" placeholder="搜索包内成员" aria-label="搜索包内成员"></label></div>
+        <div id="packageMembers" class="package-members"></div>
+      </section>
+      <footer class="page-footer"><span><i data-lucide="hard-drive"></i>LOCAL INDEX</span><span id="footerTime">—</span></footer>
+    </main>
+  </div>
+
+  <dialog class="detail-dialog" id="detailDialog" aria-labelledby="detailName">
+    <header class="detail-header"><span class="detail-kicker"><i data-lucide="file-code-2"></i>SKILL PROFILE</span><button id="closeDetail" class="icon-button" aria-label="关闭详情" title="关闭详情"><i data-lucide="x"></i></button></header>
+    <div class="detail-title"><span id="detailIcon" class="detail-category-icon"></span><div><h2 id="detailName"></h2><div id="detailBadges" class="detail-badges"></div></div></div>
+    <nav class="detail-tabs" aria-label="详情视图"><button data-detail-tab="overview" class="active" aria-pressed="true">概览</button><button data-detail-tab="introduction" aria-pressed="false">中文简介</button><button data-detail-tab="document" aria-pressed="false">原始文档</button><button data-detail-tab="notes" aria-pressed="false">我的笔记</button></nav>
+    <div id="detailOverview" class="detail-body"></div>
+    <div id="detailIntroduction" class="detail-body" hidden><form id="introductionForm"><div id="introductionNotice" class="editor-status"></div><label class="form-field"><span>中文简介</span><textarea id="introductionText" rows="6" maxlength="4000" required></textarea></label><label class="form-field"><span>适用场景</span><textarea id="introductionWhen" rows="4" maxlength="2000"></textarea></label><details class="introduction-reference"><summary>原始描述</summary><p id="introductionOriginal" class="original-description"></p></details><div class="note-actions"><span id="introductionStatus" class="editor-status" role="status"></span><button type="submit" class="button button-primary" id="saveIntroduction"><i data-lucide="save"></i>保存中文简介</button></div></form></div>
+    <div id="detailDocument" class="detail-body" hidden>
+      <div class="document-heading"><span>SKILL.md</span><div class="document-toolbar-actions"><div class="document-mode" role="group" aria-label="文档显示模式"><button type="button" data-document-mode="preview" class="active" aria-pressed="true"><i data-lucide="book-open"></i>预览</button><button type="button" data-document-mode="source" aria-pressed="false"><i data-lucide="code-2"></i>源码</button></div><button id="reloadDocument" class="icon-button" title="重新读取文档" aria-label="重新读取文档"><i data-lucide="refresh-cw"></i></button><button id="copyDocumentPath" class="icon-button" title="复制文件路径" aria-label="复制文件路径"><i data-lucide="copy"></i></button></div></div>
+      <p id="documentStatus" class="editor-status" role="status" hidden></p>
+      <article id="documentPreview" class="markdown-preview" aria-label="Markdown 预览" hidden></article>
+      <pre id="documentText" class="raw-document" aria-label="Markdown 源码" hidden></pre>
+    </div>
+    <div id="detailNotes" class="detail-body" hidden><form id="noteForm"><label class="form-field"><span>自定义用途摘要</span><textarea id="customSummaryInput" rows="3" maxlength="1000" placeholder="用途摘要"></textarea></label><label class="form-field"><span>个人备注</span><textarea id="noteInput" rows="8" maxlength="8000" placeholder="适用项目、使用经验、注意事项"></textarea></label><div class="note-actions"><span id="noteStatus" role="status"></span><button type="submit" class="button button-primary" id="saveNote"><i data-lucide="save"></i>保存笔记</button></div></form></div>
+  </dialog>
+
+  <dialog class="source-dialog" id="sourceDialog" aria-labelledby="sourceDialogTitle">
+    <form id="sourceForm"><header class="modal-header"><h2 id="sourceDialogTitle">添加来源目录</h2><button type="button" id="closeSource" class="icon-button" aria-label="关闭添加目录"><i data-lucide="x"></i></button></header><label class="form-field"><span>来源名称</span><input id="sourceName" name="label" maxlength="100" required placeholder="例如 Claude Code"></label><label class="form-field"><span>目录路径</span><input id="sourcePath" name="path" maxlength="2000" required placeholder="~/.claude/skills" spellcheck="false"></label><label class="form-field"><span>作用范围</span><select id="sourceKind" name="kind"><option value="personal">个人目录</option><option value="shared">共享目录</option><option value="project">项目目录</option><option value="builtin">软件内置</option></select></label><p id="sourceError" class="form-error" role="alert" hidden></p><div class="modal-actions"><button type="button" id="cancelSource" class="button button-secondary">取消</button><button type="submit" class="button button-primary" id="submitSource"><i data-lucide="plus"></i>添加并扫描</button></div></form>
+  </dialog>
+  <dialog class="source-dialog category-dialog" id="categoryDialog" aria-labelledby="categoryDialogTitle">
+    <form id="categoryForm"><header class="modal-header"><h2 id="categoryDialogTitle">编辑分类</h2><button type="button" class="icon-button" data-close-dialog="categoryDialog" aria-label="关闭分类编辑"><i data-lucide="x"></i></button></header><label class="form-field"><span>分类名称</span><input id="categoryName" required maxlength="40"></label><label class="form-field"><span>图标</span><select id="categoryIcon"></select></label><label class="form-field"><span>关键词</span><textarea id="categoryKeywords" rows="4" placeholder="research&#10;研究"></textarea></label><label class="form-field"><span>精确技能名称</span><textarea id="categoryNames" rows="4" placeholder="archify&#10;understand"></textarea></label><p id="categoryError" class="form-error" role="alert" hidden></p><div class="modal-actions"><button type="button" class="button button-secondary" data-close-dialog="categoryDialog">取消</button><button type="submit" class="button button-primary" id="saveCategory"><i data-lucide="save"></i>保存分类</button></div></form>
+  </dialog>
+  <dialog class="source-dialog" id="mergeDialog" aria-labelledby="mergeTitle">
+    <form id="mergeForm"><header class="modal-header"><h2 id="mergeTitle">合并并移除分类</h2><button type="button" class="icon-button" data-close-dialog="mergeDialog" aria-label="关闭合并分类"><i data-lucide="x"></i></button></header><p id="mergeDescription" class="merge-description"></p><label class="form-field"><span>目标分类</span><select id="mergeTarget" required></select></label><p class="merge-description">技能和匹配规则将合并；目标为兜底分类时仅迁移技能。人工指定保持不变。</p><p id="mergeError" class="form-error" role="alert" hidden></p><div class="modal-actions"><button type="button" class="button button-secondary" data-close-dialog="mergeDialog">取消</button><button type="submit" class="button button-primary" id="mergeCategory"><i data-lucide="merge"></i>迁移并移除</button></div></form>
+  </dialog>
+  <dialog class="reclassify-dialog" id="reclassifyDialog" aria-labelledby="reclassifyTitle">
+    <header class="modal-header"><h2 id="reclassifyTitle">重分类预览</h2><button type="button" class="icon-button" data-close-dialog="reclassifyDialog" aria-label="关闭重分类预览"><i data-lucide="x"></i></button></header><label class="checkbox-field"><input type="checkbox" id="includeManual">同时将人工指定恢复为自动分类</label><div id="previewSummary" class="management-stats"></div><div id="previewChanges" class="preview-changes"></div><p id="previewError" class="form-error" role="alert" hidden></p><div class="modal-actions"><button type="button" class="button button-secondary" id="refreshPreview"><i data-lucide="refresh-cw"></i>重新预览</button><button type="button" class="button button-primary" id="applyPreview" disabled><i data-lucide="check"></i>应用变更</button></div>
+  </dialog>
+  <dialog class="source-dialog package-dialog" id="packageDialog" aria-labelledby="packageDialogTitle">
+    <form id="packageForm"><header class="modal-header"><h2 id="packageDialogTitle">手工组包</h2><button type="button" class="icon-button" data-close-dialog="packageDialog" aria-label="关闭技能包编辑"><i data-lucide="x"></i></button></header><label class="form-field"><span>技能包名称</span><input id="packageName" maxlength="100" required></label><p id="packageEvidence" class="editor-status"></p><div id="packageMemberPicker" class="member-picker"></div><section id="packageDraftPreview" class="package-draft-preview" hidden></section><p id="packageError" class="form-error" role="alert" hidden></p><div class="modal-actions"><button type="button" class="button button-secondary" id="previewPackageButton"><i data-lucide="list-checks"></i>预览变更</button><button type="submit" class="button button-primary" id="applyPackageButton" disabled><i data-lucide="check"></i>确认应用</button></div></form>
+  </dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

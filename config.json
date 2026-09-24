@@ -1,0 +1,18 @@
+{
+  "roots": [
+    {
+      "id": "agents",
+      "label": "Shared / Agents",
+      "path": "~/.agents/skills",
+      "kind": "shared",
+      "enabled": true
+    },
+    {
+      "id": "copilot",
+      "label": "GitHub Copilot",
+      "path": "~/.copilot/skills",
+      "kind": "personal",
+      "enabled": true
+    }
+  ]
+}
