@@ -94,6 +94,25 @@ function accept(data) {
   renderCurrent();
 }
 
+function workbenchGroups(data) {
+  const roots = data.configuredRoots.flatMap(root => {
+    const report = data.roots.find(item => item.id === root.id);
+    return root.enabled !== false && report && (report.status !== 'ok' || report.issues.length) ? [{ root, report }] : [];
+  });
+  return [
+    { title: '扫描异常', iconName: 'scan-search', action: 'data-view="sources"', items: roots.map(({ root, report }) => ({ name: root.label, detail: `${rootStatuses[report.status] ?? '未扫描'} · ${report.issues.length} 项异常`, action: 'data-view="sources"' })) },
+    { title: '路径缺失', iconName: 'file-warning', action: 'data-quick="missing"', items: data.skills.filter(skill => skill.status === 'missing').map(skill => ({ name: skill.metadata.name, detail: rootLabelFor(data, skill), action: `data-skill="${escapeHtml(skill.id)}"` })) },
+    { title: '新发现 · 近 7 天', iconName: 'sparkles', action: 'data-quick="recent"', items: data.libraryItems.filter(isRecent).map(item => ({ name: item.metadata.name, detail: item.entityType === 'package' ? `${item.memberCount} 个入口` : rootLabelFor(data, item), action: `${item.entityType === 'package' ? 'data-package' : 'data-skill'}="${escapeHtml(item.id)}"` })) },
+    { title: '中文待复核', iconName: 'languages', action: 'data-quick="zh-stale"', items: data.skills.filter(skill => skill.introduction?.stale).map(skill => ({ name: skill.metadata.name, detail: rootLabelFor(data, skill), action: `data-skill="${escapeHtml(skill.id)}"` })) },
+    { title: '待确认分组', iconName: 'package-search', action: 'data-view="packages"', items: data.packageCandidates.map(group => ({ name: group.name, detail: `${group.memberIds.length} 个入口${group.conflicts.length ? ' · 归属冲突' : ''}`, action: `data-view="packages" data-work-candidate="${escapeHtml(group.id)}"` })) },
+  ];
+}
+
+function rootLabelFor(data, skill) {
+  const location = skill.locations[0];
+  return data.configuredRoots.find(root => root.id === location?.rootId)?.label ?? '来源未知';
+}
+
 function renderOverview() {
   const data = state.data;
   get('metricPackages').textContent = data.stats.packages;
@@ -101,6 +120,7 @@ function renderOverview() {
   get('metricMembers').textContent = data.stats.members;
   get('metricEntries').textContent = data.stats.entries;
   get('navTotal').textContent = data.libraryItems.length;
+  get('navPending').textContent = workbenchGroups(data).reduce((count, group) => count + group.items.length, 0);
   get('navPackages').textContent = data.packages.length;
   get('navChanges').textContent = data.events.length;
   get('navSources').textContent = data.configuredRoots.length;
@@ -119,13 +139,21 @@ function renderOverview() {
   get('footerTime').textContent = time ? `最近同步 ${date(time, true)}` : '等待首次扫描';
   get('autoScanToggle').checked = data.settings.autoScan;
   const group = data.packages.find(item => item.id === state.packageId);
-  get('pageMeta').textContent = state.view === 'library' ? `${data.stats.packages} 个技能包 · ${data.stats.standalone} 个独立技能 · ${data.stats.entries} 个入口` : state.view === 'history' ? `${data.events.length} 条变化 · 扫描、分类与归属` : state.view === 'categories' ? `${data.categories.length} 个用途分类 · ${data.libraryItems.length} 个整包或独立技能` : state.view === 'packages' ? `${data.packages.length} 个技能包 · ${data.packageCandidates.length} 个待确认分组` : state.view === 'package' && group ? `${group.memberCount} 个入口 · ${group.entrySkillId ? '含主入口' : '无主入口的技能集合'}` : `${data.configuredRoots.length} 个来源 · ${data.configuredRoots.filter(root => root.enabled !== false).length} 个参与扫描`;
+  get('pageMeta').textContent = state.view === 'workbench' ? `${get('navPending').textContent} 项线索 · 扫描、收录与内容复核` : state.view === 'library' ? `${data.stats.packages} 个技能包 · ${data.stats.standalone} 个独立技能 · ${data.stats.entries} 个入口` : state.view === 'history' ? `${data.events.length} 条变化 · 扫描、分类与归属` : state.view === 'categories' ? `${data.categories.length} 个用途分类 · ${data.libraryItems.length} 个整包或独立技能` : state.view === 'packages' ? `${data.packages.length} 个技能包 · ${data.packageCandidates.length} 个待确认分组` : state.view === 'package' && group ? `${group.memberCount} 个入口 · ${group.entrySkillId ? '含主入口' : '无主入口的技能集合'}` : `${data.configuredRoots.length} 个来源 · ${data.configuredRoots.filter(root => root.enabled !== false).length} 个参与扫描`;
+  icons();
+}
+
+function renderWorkbench() {
+  const groups = workbenchGroups(state.data);
+  get('workbenchCount').textContent = groups.reduce((count, group) => count + group.items.length, 0);
+  get('workbenchList').innerHTML = groups.map(group => `<section class="workbench-group"><div class="section-toolbar"><div class="section-title">${icon(group.iconName)}<h2>${group.title}</h2><span class="result-count">${group.items.length}</span></div><button class="text-button" ${group.action} aria-label="查看全部${group.title}">查看全部 ${icon('arrow-up-right')}</button></div><div class="workbench-entries">${group.items.length ? group.items.slice(0, 4).map(item => `<button class="workbench-entry" ${item.action}><span>${escapeHtml(item.name)}</span><small>${escapeHtml(item.detail)}</small>${icon('chevron-right')}</button>`).join('') : '<p class="workbench-empty">暂无</p>'}</div></section>`).join('');
   icons();
 }
 
 function filteredSkills() {
   const words = state.query.toLowerCase().trim().split(/\s+/).filter(Boolean);
   const matches = skill => {
+    if (['present', 'missing', 'unknown'].includes(state.status) && skill.status !== state.status) return false;
     if (state.source && !skill.locations.some(location => location.rootId === state.source)) return false;
     if (state.status === 'issues' && !skill.metadata.parseError) return false;
     if (state.status === 'duplicates' && !(skill.status === 'present' && skill.sameNameCount > 1)) return false;
@@ -141,7 +169,6 @@ function filteredSkills() {
     if (state.recent && !isRecent(skill)) return false;
     if (state.status === 'manual' && skill.categoryMode !== 'manual') return false;
     if (state.status === 'pending' && !skill.classificationPending) return false;
-    if (['present', 'missing', 'unknown'].includes(state.status) && skill.status !== state.status) return false;
     if (skill.entityType !== 'package') return matches(skill);
     return state.data.skills.some(member => member.packageId === skill.id && matches(member)) || !['issues', 'duplicates', 'zh-missing', 'zh-stale'].includes(state.status) && matches(skill);
   });
@@ -171,7 +198,8 @@ function renderLibrary() {
     if (skill.entityType === 'package') {
       const words = state.query.toLowerCase().trim().split(/\s+/).filter(Boolean);
       const matching = words.length ? state.data.skills.filter(member => member.packageId === skill.id && words.every(word => `${member.metadata.name} ${member.summary} ${member.introduction?.whenToUse ?? ''} ${member.note}`.toLowerCase().includes(word))) : [];
-      return `<article class="skill-row package-library-row" data-package-row="${skill.id}"><div class="skill-main"><span class="skill-symbol package-symbol">${icon('package')}</span><div class="skill-description"><button class="skill-name" data-package="${skill.id}">${escapeHtml(skill.name)}</button><span class="package-badge">技能包 · ${skill.memberCount} 个入口</span><p class="skill-summary">${escapeHtml(skill.summary)}</p>${matching.length ? `<div class="package-matches"><span>命中 ${matching.length} 个成员</span>${matching.slice(0, 2).map(member => `<button data-skill="${member.id}">${escapeHtml(member.metadata.name)}</button>`).join('')}</div>` : ''}</div></div><div class="skill-category"><span class="category-label">${escapeHtml(category.label)}</span><small class="classification-mode">${skill.categoryMode === 'manual' ? '整包人工指定' : '整包分类'}</small></div><div class="skill-sources source-labels">${roots.map(root => `<span class="source-label">${icon('folder')}<span>${escapeHtml(rootLabel(root))}</span></span>`).join('')}</div><div class="skill-status">${statusMarkup(skill.status)}<span class="record-time">${skill.presentMemberCount} / ${skill.memberCount} 存在</span></div><button class="icon-button row-arrow" data-package="${skill.id}" title="展开技能包" aria-label="展开 ${escapeHtml(skill.name)}">${icon('chevron-right')}</button></article>`;
+      const matchingStatus = ['missing', 'unknown'].includes(state.status) ? state.data.skills.filter(member => member.packageId === skill.id && member.status === state.status).length : 0;
+      return `<article class="skill-row package-library-row" data-package-row="${skill.id}"><div class="skill-main"><span class="skill-symbol package-symbol">${icon('package')}</span><div class="skill-description"><button class="skill-name" data-package="${skill.id}">${escapeHtml(skill.name)}</button><span class="package-badge">技能包 · ${skill.memberCount} 个入口</span>${matchingStatus ? `<span class="mini-badge warning">${matchingStatus} 个${state.status === 'missing' ? '缺失' : '待确认'}入口</span>` : ''}<p class="skill-summary">${escapeHtml(skill.summary)}</p>${matching.length ? `<div class="package-matches"><span>命中 ${matching.length} 个成员</span>${matching.slice(0, 2).map(member => `<button data-skill="${member.id}">${escapeHtml(member.metadata.name)}</button>`).join('')}</div>` : ''}</div></div><div class="skill-category"><span class="category-label">${escapeHtml(category.label)}</span><small class="classification-mode">${skill.categoryMode === 'manual' ? '整包人工指定' : '整包分类'}</small></div><div class="skill-sources source-labels">${roots.map(root => `<span class="source-label">${icon('folder')}<span>${escapeHtml(rootLabel(root))}</span></span>`).join('')}</div><div class="skill-status">${statusMarkup(skill.status)}<span class="record-time">${skill.presentMemberCount} / ${skill.memberCount} 存在</span></div><button class="icon-button row-arrow" data-package="${skill.id}" title="展开技能包" aria-label="展开 ${escapeHtml(skill.name)}">${icon('chevron-right')}</button></article>`;
     }
     return `<article class="skill-row"><div class="skill-main"><span class="skill-symbol tone-${skill.category}">${icon(category.icon)}</span><div class="skill-description"><button class="skill-name" data-skill="${skill.id}">${escapeHtml(skill.metadata.name)}</button>${skill.sameNameCount > 1 ? '<span class="mini-badge">同名</span>' : ''}${skill.metadata.parseError ? '<span class="mini-badge warning">需整理</span>' : ''}${skill.introduction?.stale ? '<span class="mini-badge warning">中文待复核</span>' : !skill.introduction ? '<span class="mini-badge">待补中文</span>' : ''}<p class="skill-summary" title="${escapeHtml(skill.summary)}">${escapeHtml(skill.summary)}</p></div></div><div class="skill-category"><span class="category-label"><span class="category-dot"></span>${escapeHtml(category.label)}</span>${skill.categoryMode === 'manual' ? '<small class="classification-mode">人工指定</small>' : skill.classificationPending ? '<small class="classification-mode pending">待重分类</small>' : ''}</div><div class="skill-sources source-labels">${roots.map(root => `<span class="source-label" title="${escapeHtml(rootLabel(root))}">${icon('folder')}<span>${escapeHtml(rootLabel(root))}</span></span>`).join('')}</div><div class="skill-status">${statusMarkup(skill.status)}<time class="record-time" title="首次发现 ${date(skill.firstSeen, true)}">${date(skill.firstSeen)}</time></div><button class="icon-button row-arrow" data-skill="${skill.id}" title="查看详情" aria-label="查看 ${escapeHtml(skill.metadata.name)}">${icon('chevron-right')}</button></article>`;
   }).join('');
@@ -208,7 +236,8 @@ function renderSources() {
 
 function renderCurrent() {
   if (!state.data) return;
-  if (state.view === 'library') renderLibrary();
+  if (state.view === 'workbench') renderWorkbench();
+  else if (state.view === 'library') renderLibrary();
   else if (state.view === 'history') renderHistory();
   else if (state.view === 'categories') renderCategories();
   else if (state.view === 'packages') renderPackages();
@@ -222,7 +251,7 @@ function setView(view) {
     state.packageCategoryDirty = false;
   }
   state.view = view;
-  const titles = { library: ['技能目录', 'YOUR LOCAL TOOLKIT'], history: ['变化记录', 'COLLECTION ACTIVITY'], sources: ['来源目录', 'CONNECTED SOURCES'], categories: ['分类管理', 'TAXONOMY & RULES'], packages: ['技能包', 'PACKAGES & COLLECTIONS'], package: [state.data?.packages.find(group => group.id === state.packageId)?.name ?? '技能包', 'PACKAGE PROFILE'] };
+  const titles = { library: ['技能目录', 'YOUR LOCAL TOOLKIT'], workbench: ['待处理', 'COLLECTION FOLLOW-UP'], history: ['变化记录', 'COLLECTION ACTIVITY'], sources: ['来源目录', 'CONNECTED SOURCES'], categories: ['分类管理', 'TAXONOMY & RULES'], packages: ['技能包', 'PACKAGES & COLLECTIONS'], package: [state.data?.packages.find(group => group.id === state.packageId)?.name ?? '技能包', 'PACKAGE PROFILE'] };
   get('catalogMetrics').hidden = view === 'package';
   get('pageTitle').textContent = titles[view][0];
   get('breadcrumbCurrent').textContent = titles[view][0];
@@ -498,7 +527,7 @@ function renderPackages() {
   const candidates = state.data.packageCandidates;
   get('packageCandidatesSection').hidden = !candidates.length;
   get('packageCandidateCount').textContent = candidates.length;
-  get('packageCandidateList').innerHTML = candidates.map(group => `<article class="package-candidate-row"><div><h3>${escapeHtml(group.name)}</h3><p class="package-meta">${group.memberIds.length} 个入口 · ${escapeHtml(packageEvidenceLabels[group.evidence])}${group.conflicts.length ? ' · 归属冲突' : ''}</p><p class="source-path">${escapeHtml(group.canonicalPath)}</p></div><div class="toolbar-actions"><button class="button button-secondary" data-package-action="suppress" data-package-target="${group.id}">保持独立</button><button class="button button-primary" data-package-action="confirm" data-package-target="${group.id}" ${group.conflicts.length ? 'disabled' : ''}>${icon('package-check')}确认成包</button></div></article>`).join('');
+  get('packageCandidateList').innerHTML = candidates.map(group => `<article class="package-candidate-row" data-candidate-id="${escapeHtml(group.id)}"><div><h3>${escapeHtml(group.name)}</h3><p class="package-meta">${group.memberIds.length} 个入口 · ${escapeHtml(packageEvidenceLabels[group.evidence])}${group.conflicts.length ? ' · 归属冲突' : ''}</p><p class="source-path">${escapeHtml(group.canonicalPath)}</p></div><div class="toolbar-actions"><button class="button button-secondary" data-package-action="suppress" data-package-target="${group.id}">保持独立</button><button class="button button-primary" data-package-action="confirm" data-package-target="${group.id}" ${group.conflicts.length ? 'disabled' : ''}>${icon('package-check')}确认成包</button></div></article>`).join('');
   icons();
 }
 
@@ -570,6 +599,7 @@ document.addEventListener('click', event => {
   if (button.dataset.view) {
     if (button.dataset.view === 'library') state.category = '';
     setView(button.dataset.view);
+    if (button.dataset.workCandidate) get('packageCandidateList').querySelector(`[data-candidate-id="${CSS.escape(button.dataset.workCandidate)}"]`)?.scrollIntoView({ block: 'center' });
   }
   if (!state.data) return;
   if (button.dataset.category) { state.category = button.dataset.category; state.page = 1; setView('library'); }
@@ -578,6 +608,7 @@ document.addEventListener('click', event => {
     if (button.dataset.quick === 'sources') { setView('sources'); return; }
     resetFilters();
     if (button.dataset.quick === 'recent') { state.recent = true; state.sort = 'firstSeen'; }
+    if (['missing', 'zh-stale'].includes(button.dataset.quick)) state.status = button.dataset.quick;
     if (button.dataset.quick === 'duplicates') state.status = 'duplicates';
     if (button.dataset.quick === 'all') state.status = 'present';
     if (button.dataset.quick === 'standalone') state.kind = 'skill';
