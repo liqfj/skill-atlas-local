@@ -5,6 +5,9 @@ const state = { data: null, token: '', view: 'library', category: '', query: '',
 Object.assign(state, { kind: '', packageId: null, packageQuery: '', packageEdit: null, packageDraft: null, packageCategoryDirty: false, packageCategoryValue: '' });
 Object.assign(state, { document: null, documentMode: 'preview', documentLoading: false, documentError: '' });
 state.importSequence = 0;
+state.importDraft = null;
+state.importApplying = false;
+state.importSupported = false;
 const categoryNames = new Map();
 const statusLabels = { present: '已发现', missing: '路径缺失', unknown: '待确认' };
 const eventLabels = { added: '新增发现', updated: '内容更新', missing: '路径缺失', restored: '重新发现', classified: '分类调整', packaged: '包归属调整' };
@@ -31,6 +34,7 @@ const errors = {
   INVALID_PACKAGE: '请检查技能包名称和操作。', INVALID_PACKAGE_MEMBERS: '请至少选择两个不同的成员。',
   PACKAGE_MEMBERS_CONFLICT: '成员已有包归属或待确认分组，请先处理原分组，不能同时归入两个包。',
   INVALID_IMPORT: '不是受支持的目录导出，或文件内容不完整。', INVALID_JSON: '无法解析 JSON 文件。', BODY_TOO_LARGE: '备份文件不能超过 16 MiB。',
+  IMPORT_STALE: '目录或备份预览已变化，请重新选择文件预览。', IMPORT_SOURCE_MISMATCH: '备份的技能包与当前扫描不一致，请检查来源并重新扫描。', IMPORT_BACKUP_FAILED: '无法保存原目录的私有备份，未执行恢复。',
 };
 let toastTimer;
 let loadSequence = 0;
@@ -77,7 +81,10 @@ function connection(online) {
 function accept(data) {
   state.data = data;
   if (data.token) state.token = data.token;
-  get('previewImportButton').hidden = data.features?.importPreview !== true;
+  if (data.features) {
+    get('previewImportButton').hidden = data.features.importPreview !== true;
+    state.importSupported = data.features.importApply === true;
+  }
   categoryNames.clear();
   data.categories.forEach(category => categoryNames.set(category.id, category.label));
   if (state.category && !categoryNames.has(state.category)) state.category = '';
@@ -630,14 +637,23 @@ for (const [id, key] of [['sourceFilter', 'source'], ['statusFilter', 'status'],
 get('eventFilter').addEventListener('change', event => { state.eventType = event.target.value; state.historyLimit = 50; renderHistory(); });
 get('scanButton').addEventListener('click', () => scan());
 get('previewImportButton').addEventListener('click', () => get('importFile').click());
+function resetImportConfirmation() {
+  state.importDraft = null;
+  get('confirmImport').checked = false;
+  get('importConfirmation').hidden = true;
+  get('applyImportButton').hidden = true;
+  get('applyImportButton').disabled = true;
+}
 get('importFile').addEventListener('change', async event => {
   const file = event.target.files?.[0];
   event.target.value = '';
-  if (!file) return;
+  if (!file || state.importApplying) return;
   const sequence = ++state.importSequence;
   const dialog = get('importDialog');
+  resetImportConfirmation();
   get('importFilename').textContent = file.name;
   get('importSummary').textContent = '正在读取文件…';
+  get('importGuidance').textContent = '预览不会修改当前目录。';
   get('importError').hidden = true;
   dialog.showModal();
   try {
@@ -647,8 +663,17 @@ get('importFile').addEventListener('change', async event => {
     catch { throw new Error(errors.INVALID_JSON); }
     const preview = await request('/api/import/preview', { method: 'POST', body: JSON.stringify({ snapshot }) });
     if (sequence !== state.importSequence || !dialog.open) return;
-    if (preview.applicable !== false || preview.sourceRootsApplied !== false) throw new Error(errors.INVALID_IMPORT);
-    get('importSummary').textContent = `${preview.skills} 个技能 · ${preview.packages} 个技能包 · ${preview.events} 条变化 · ${preview.configuredRoots} 个来源（未导入）`;
+    if (typeof preview.applicable !== 'boolean' || preview.sourceRootsApplied !== false) throw new Error(errors.INVALID_IMPORT);
+    get('importSummary').textContent = `备份：${preview.skills} 个技能 · ${preview.packages} 个包 · ${preview.events} 条变化；当前：${state.data.skills.length} 个技能 · ${state.data.packages.length} 个包 · ${state.data.events.length} 条变化`;
+    if (!preview.applicable) get('importGuidance').textContent = '备份技能与当前扫描不一致。请先手动添加来源并扫描；来源目录和设置不会从备份中启用。';
+    else if (!state.importSupported) get('importGuidance').textContent = '当前服务只支持预览。保存页面草稿并重启服务后，才能确认恢复。';
+    else {
+      if (typeof preview.previewId !== 'string') throw new Error(errors.INVALID_IMPORT);
+      state.importDraft = { previewId: preview.previewId, snapshot };
+      get('importGuidance').textContent = '技能身份已匹配。来源目录和设置保持本机当前值；确认仅在 5 分钟内有效。';
+      get('importConfirmation').hidden = false;
+      get('applyImportButton').hidden = false;
+    }
   } catch (error) {
     if (sequence !== state.importSequence || !dialog.open) return;
     get('importSummary').textContent = '';
@@ -656,8 +681,39 @@ get('importFile').addEventListener('change', async event => {
     get('importError').hidden = false;
   }
 });
-get('importDialog').addEventListener('close', () => { state.importSequence += 1; });
-for (const id of ['closeImport', 'dismissImport']) get(id).addEventListener('click', () => get('importDialog').close());
+get('confirmImport').addEventListener('change', event => { get('applyImportButton').disabled = !event.target.checked || !state.importDraft; });
+get('applyImportButton').addEventListener('click', async () => {
+  if (state.importApplying || !state.importDraft || !get('confirmImport').checked) return;
+  const draft = state.importDraft;
+  state.importApplying = true;
+  get('applyImportButton').disabled = true;
+  get('confirmImport').disabled = true;
+  get('closeImport').disabled = true;
+  get('dismissImport').disabled = true;
+  get('importSummary').textContent = '正在保存原目录并恢复…';
+  try {
+    const data = await request('/api/import/apply', { method: 'POST', body: JSON.stringify(draft) });
+    resetImportConfirmation();
+    accept(data);
+    get('importSummary').textContent = `恢复完成，原目录已备份至 ${data.backup}。`;
+    get('importGuidance').textContent = '当前来源目录与设置没有改变。';
+    get('importError').hidden = true;
+  } catch (error) {
+    resetImportConfirmation();
+    get('importSummary').textContent = '';
+    get('importGuidance').textContent = '请重新选择备份文件，核对后再试。';
+    get('importError').textContent = error.message;
+    get('importError').hidden = false;
+  } finally {
+    state.importApplying = false;
+    get('confirmImport').disabled = false;
+    get('closeImport').disabled = false;
+    get('dismissImport').disabled = false;
+  }
+});
+get('importDialog').addEventListener('cancel', event => { if (state.importApplying) event.preventDefault(); });
+get('importDialog').addEventListener('close', () => { state.importSequence += 1; resetImportConfirmation(); });
+for (const id of ['closeImport', 'dismissImport']) get(id).addEventListener('click', () => { if (!state.importApplying) get('importDialog').close(); });
 get('retryConnection').addEventListener('click', () => refresh(true));
 get('closeDetail').addEventListener('click', closeDetail);
 get('detailDialog').addEventListener('cancel', event => { event.preventDefault(); closeDetail(); });

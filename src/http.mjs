@@ -61,10 +61,11 @@ export function createApp(store, directory) {
         const supplied = Buffer.from(request.headers['x-catalog-token'] ?? '');
         if (supplied.length !== tokenBytes.length || !timingSafeEqual(supplied, tokenBytes)) throw new AppError('TOKEN_REQUIRED', 403);
       }
-      if (request.method === 'GET' && url.pathname === '/api/catalog') return json({ ...store.view(), token, features: { importPreview: true } });
+      if (request.method === 'GET' && url.pathname === '/api/catalog') return json({ ...store.view(), token, features: { importPreview: true, importApply: true } });
       if (request.method === 'GET' && url.pathname === '/api/candidates') return json(await store.candidates());
       if (request.method === 'GET' && url.pathname === '/api/export') return json(store.view(), 200, { 'Content-Disposition': 'attachment; filename="skill-atlas.json"' });
-      if (request.method === 'POST' && url.pathname === '/api/import/preview') return json(store.previewImport(await bodyJson(request, 16 * 1024 * 1024)));
+      if (request.method === 'POST' && url.pathname === '/api/import/preview') return json(await store.previewImport(await bodyJson(request, 16 * 1024 * 1024)));
+      if (request.method === 'POST' && url.pathname === '/api/import/apply') return json(await store.applyImport(await bodyJson(request, 16 * 1024 * 1024)));
       if (request.method === 'POST' && url.pathname === '/api/scan') {
         await bodyJson(request);
         return json(await store.scan());

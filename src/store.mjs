@@ -17,6 +17,14 @@ export class AppError extends Error {
   }
 }
 
+function importFingerprint(value) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+function importBytesFingerprint(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
 export async function acquireCatalogLock(directory) {
   const lockPath = path.join(directory, 'data', 'instance.lock');
   await fs.mkdir(path.dirname(lockPath), { recursive: true });
@@ -44,11 +52,17 @@ export async function acquireCatalogLock(directory) {
   };
 }
 
-export async function atomicJson(filePath, value) {
+export async function atomicJson(filePath, value, expectedHash) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const temporary = `${filePath}.${randomUUID()}.tmp`;
   try {
     await fs.writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    if (expectedHash !== undefined) {
+      let currentBytes;
+      try { currentBytes = await fs.readFile(filePath); }
+      catch { throw new AppError('IMPORT_STALE', 409); }
+      if (importBytesFingerprint(currentBytes) !== expectedHash) throw new AppError('IMPORT_STALE', 409);
+    }
     await fs.rename(temporary, filePath);
   } finally {
     await fs.rm(temporary, { force: true });
@@ -99,6 +113,96 @@ function preparedCatalog(catalog, localEntries = {}) {
   };
 }
 
+const importSkillId = /^[a-f0-9]{24}$/;
+const importPackageId = /^pkg-[a-f0-9]{24}$/;
+const importEventTypes = new Set(['added', 'updated', 'missing', 'restored', 'classified', 'packaged']);
+
+function importedClassification(value, taxonomy) {
+  if (!value || !['manual', 'auto'].includes(value.mode) || !taxonomy.some(category => category.id === value.categoryId) || value.appliedAt !== undefined && (typeof value.appliedAt !== 'string' || !Number.isFinite(Date.parse(value.appliedAt)))) throw new AppError('INVALID_IMPORT');
+  return { categoryId: value.categoryId, mode: value.mode, ...(value.appliedAt ? { appliedAt: value.appliedAt } : {}) };
+}
+
+function importedIntroduction(value) {
+  if (value === null) return null;
+  if (!value || typeof value.text !== 'string' || !value.text.trim() || value.text.length > 4000 || typeof value.whenToUse !== 'string' || value.whenToUse.length > 2000 || !['manual', 'local', 'preset', 'original'].includes(value.source) || !/^[a-f0-9]{64}$/.test(value.sourceHash) || !Number.isSafeInteger(value.revision) || value.revision < 1 || typeof value.updatedAt !== 'string' || !Number.isFinite(Date.parse(value.updatedAt))) throw new AppError('INVALID_IMPORT');
+  return { text: value.text, whenToUse: value.whenToUse, source: value.source, sourceHash: value.sourceHash, revision: value.revision, updatedAt: value.updatedAt };
+}
+
+function importedEvent(event, knownIds) {
+  if (!event || typeof event !== 'object' || !/^[a-f0-9-]{36}$/.test(event.id) || !importEventTypes.has(event.type) || ![importSkillId, importPackageId].some(pattern => pattern.test(event.skillId)) || typeof event.name !== 'string' || event.name.length > 1000 || typeof event.at !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(event.at) || !Number.isFinite(Date.parse(event.at)) || event.path !== undefined && event.path !== null && (typeof event.path !== 'string' || event.path.length > 2000)) throw new AppError('INVALID_IMPORT');
+  const result = { id: event.id, type: event.type, skillId: event.skillId, name: event.name, at: event.at };
+  if (event.path !== undefined) result.path = event.path;
+  if (event.packageId !== undefined) {
+    if (!importPackageId.test(event.packageId)) throw new AppError('INVALID_IMPORT');
+    result.packageId = event.packageId;
+  }
+  for (const field of ['fromCategory', 'toCategory']) if (event[field] !== undefined) {
+    if (typeof event[field] !== 'string' || event[field].length > 200) throw new AppError('INVALID_IMPORT');
+    result[field] = event[field];
+  }
+  if (event.mode !== undefined) {
+    if (!['manual', 'auto'].includes(event.mode)) throw new AppError('INVALID_IMPORT');
+    result.mode = event.mode;
+  }
+  if (event.action !== undefined) {
+    if (!['create', 'edit', 'confirm', 'suppress'].includes(event.action)) throw new AppError('INVALID_IMPORT');
+    result.action = event.action;
+  }
+  if (event.entityType !== undefined) {
+    if (event.entityType !== 'package') throw new AppError('INVALID_IMPORT');
+    result.entityType = event.entityType;
+  }
+  if (event.memberCount !== undefined) {
+    if (!Number.isSafeInteger(event.memberCount) || event.memberCount < 0 || event.memberCount > 30000) throw new AppError('INVALID_IMPORT');
+    result.memberCount = event.memberCount;
+  }
+  if (result.packageId) {
+    if (result.skillId !== result.packageId || !['classified', 'packaged'].includes(result.type)) throw new AppError('INVALID_IMPORT');
+  } else if (!knownIds.has(result.skillId) || result.type === 'packaged' || result.entityType === 'package') throw new AppError('INVALID_IMPORT');
+  return result;
+}
+
+function importedCatalog(snapshot, current, localEntries) {
+  if (!Number.isSafeInteger(snapshot.taxonomyRevision) || snapshot.taxonomyRevision < 1 || !Array.isArray(snapshot.packageRules) || snapshot.packageRules.length > 1000 || snapshot.events.length > 100000 || snapshot.packages.length > 1000) throw new AppError('INVALID_IMPORT');
+  let taxonomy;
+  try { taxonomy = validateTaxonomy(snapshot.taxonomy); }
+  catch { throw new AppError('INVALID_IMPORT'); }
+  const knownIds = new Set(current.skills.map(skill => skill.id));
+  const backupSkills = new Map(snapshot.skills.map(skill => [skill.id, skill]));
+  const skills = current.skills.map(skill => {
+    const backup = backupSkills.get(skill.id);
+    return { ...skill, note: backup.note, customSummary: backup.customSummary, introduction: importedIntroduction(backup.introduction), classification: importedClassification(backup.classification, taxonomy) };
+  });
+  const groupIds = new Set();
+  const packages = snapshot.packages.map(group => {
+    if (!group || !importPackageId.test(group.id) || groupIds.has(group.id) || typeof group.name !== 'string' || !group.name.trim() || group.name.length > 100 || !Array.isArray(group.memberIds) || group.memberIds.length < 2 || group.memberIds.length > 5000 || new Set(group.memberIds).size !== group.memberIds.length || group.memberIds.some(id => !knownIds.has(id)) || group.entrySkillId !== null && !group.memberIds.includes(group.entrySkillId)) throw new AppError('INVALID_IMPORT');
+    groupIds.add(group.id);
+    return { id: group.id, name: group.name, memberIds: [...group.memberIds], entrySkillId: group.entrySkillId, classification: importedClassification(group.classification, taxonomy) };
+  });
+  const ruleIds = new Set();
+  const packageRules = snapshot.packageRules.map(rule => {
+    if (!rule || !importPackageId.test(rule.id) || ruleIds.has(rule.id) || !['manual', 'confirmed', 'suppressed'].includes(rule.mode)) throw new AppError('INVALID_IMPORT');
+    ruleIds.add(rule.id);
+    if (rule.mode === 'suppressed') return { id: rule.id, mode: 'suppressed' };
+    if (typeof rule.name !== 'string' || !rule.name.trim() || rule.name.length > 100) throw new AppError('INVALID_IMPORT');
+    if (rule.mode === 'confirmed') return { id: rule.id, mode: 'confirmed', name: rule.name };
+    if (!Array.isArray(rule.memberIds) || rule.memberIds.length < 2 || rule.memberIds.length > 5000 || new Set(rule.memberIds).size !== rule.memberIds.length || rule.memberIds.some(id => !knownIds.has(id))) throw new AppError('INVALID_IMPORT');
+    return { id: rule.id, mode: 'manual', name: rule.name, memberIds: [...rule.memberIds] };
+  });
+  const eventIds = new Set();
+  const events = snapshot.events.map(event => {
+    const restored = importedEvent(event, knownIds);
+    if (eventIds.has(restored.id)) throw new AppError('INVALID_IMPORT');
+    eventIds.add(restored.id);
+    return restored;
+  });
+  const next = preparedCatalog({ ...current, skills, packages, packageRules, events, taxonomy, taxonomyRevision: snapshot.taxonomyRevision }, localEntries);
+  const expected = packages.map(group => [group.id, [...group.memberIds].sort()]).sort((left, right) => left[0].localeCompare(right[0]));
+  const actual = next.packages.map(group => [group.id, [...group.memberIds].sort()]).sort((left, right) => left[0].localeCompare(right[0]));
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new AppError('IMPORT_SOURCE_MISMATCH', 409);
+  return next;
+}
+
 function classificationEvent(skill, classification, taxonomy) {
   return {
     id: randomUUID(), type: 'classified', skillId: skill.id, name: skill.metadata.name,
@@ -120,6 +224,7 @@ export class CatalogStore {
     this.pending = Promise.resolve();
     this.activeScan = null;
     this.previews = new Map();
+    this.importDraft = null;
   }
 
   async initialize() {
@@ -141,21 +246,50 @@ export class CatalogStore {
   view() { return presentCatalog(this.catalog, this.config); }
 
   previewImport(values) {
-    const snapshot = values?.snapshot;
-    if (snapshot?.version !== 1 || !Array.isArray(snapshot.skills) || !Array.isArray(snapshot.events) || !Array.isArray(snapshot.packages) || !Array.isArray(snapshot.taxonomy) || !Array.isArray(snapshot.configuredRoots)) throw new AppError('INVALID_IMPORT');
-    const ids = new Set();
-    for (const skill of snapshot.skills) {
-      if (!skill || !/^[a-f0-9]{24}$/.test(skill.id) || ids.has(skill.id) || typeof skill.metadata?.name !== 'string' || typeof skill.note !== 'string' || skill.note.length > 8000 || typeof skill.customSummary !== 'string' || skill.customSummary.length > 1000) throw new AppError('INVALID_IMPORT');
-      ids.add(skill.id);
-    }
-    if (snapshot.events.some(event => !event || typeof event.id !== 'string')) throw new AppError('INVALID_IMPORT');
-    try { validateTaxonomy(snapshot.taxonomy); }
-    catch { throw new AppError('INVALID_IMPORT'); }
-    return { version: 1, skills: snapshot.skills.length, packages: snapshot.packages.length, events: snapshot.events.length, configuredRoots: snapshot.configuredRoots.length, applicable: false, sourceRootsApplied: false };
+    return this.enqueue(async () => {
+      this.importDraft = null;
+      const snapshot = values?.snapshot;
+      if (snapshot?.version !== 1 || !Array.isArray(snapshot.skills) || !Array.isArray(snapshot.events) || !Array.isArray(snapshot.packages) || !Array.isArray(snapshot.taxonomy) || !Array.isArray(snapshot.configuredRoots)) throw new AppError('INVALID_IMPORT');
+      const ids = new Set();
+      for (const skill of snapshot.skills) {
+        if (!skill || !/^[a-f0-9]{24}$/.test(skill.id) || ids.has(skill.id) || typeof skill.metadata?.name !== 'string' || typeof skill.note !== 'string' || skill.note.length > 8000 || typeof skill.customSummary !== 'string' || skill.customSummary.length > 1000) throw new AppError('INVALID_IMPORT');
+        ids.add(skill.id);
+      }
+      if (snapshot.events.some(event => !event || typeof event.id !== 'string')) throw new AppError('INVALID_IMPORT');
+      try { validateTaxonomy(snapshot.taxonomy); }
+      catch { throw new AppError('INVALID_IMPORT'); }
+      const currentIds = new Set(this.catalog.skills.map(skill => skill.id));
+      const applicable = currentIds.size === ids.size && [...ids].every(id => currentIds.has(id));
+      const summary = { version: 1, skills: snapshot.skills.length, packages: snapshot.packages.length, events: snapshot.events.length, configuredRoots: snapshot.configuredRoots.length, applicable, sourceRootsApplied: false };
+      if (!applicable) return summary;
+      const diskBytes = await fs.readFile(this.dataPath);
+      const next = importedCatalog(snapshot, this.catalog, this.localIntroductions);
+      const previewId = randomUUID();
+      this.importDraft = { previewId, snapshotHash: importFingerprint(snapshot), stateHash: importFingerprint([this.catalog, this.config]), diskHash: importBytesFingerprint(diskBytes), next, expiresAt: Date.now() + 5 * 60 * 1000 };
+      return { ...summary, previewId };
+    });
   }
 
-  async saveCatalog(next) {
-    await atomicJson(this.dataPath, next);
+  applyImport(values) {
+    return this.enqueue(async () => {
+      const draft = this.importDraft;
+      this.importDraft = null;
+      if (!draft || draft.previewId !== values?.previewId || draft.expiresAt < Date.now() || !values.snapshot || typeof values.snapshot !== 'object' || Array.isArray(values.snapshot) || draft.snapshotHash !== importFingerprint(values.snapshot) || draft.stateHash !== importFingerprint([this.catalog, this.config])) throw new AppError('IMPORT_STALE', 409);
+      const diskBytes = await fs.readFile(this.dataPath);
+      if (draft.diskHash !== importBytesFingerprint(diskBytes)) throw new AppError('IMPORT_STALE', 409);
+      const backupDirectory = path.join(this.directory, 'data', 'backups');
+      await fs.mkdir(backupDirectory, { recursive: true, mode: 0o700 });
+      const directoryStat = await fs.lstat(backupDirectory);
+      if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) throw new AppError('IMPORT_BACKUP_FAILED', 500);
+      const backupPath = path.join(backupDirectory, `catalog-before-import-${randomUUID()}.json`);
+      await fs.writeFile(backupPath, diskBytes, { flag: 'wx', mode: 0o600 });
+      if (!(await fs.readFile(backupPath)).equals(diskBytes)) throw new AppError('IMPORT_BACKUP_FAILED', 500);
+      return { ...await this.saveCatalog(draft.next, draft.diskHash), backup: `data/backups/${path.basename(backupPath)}` };
+    });
+  }
+
+  async saveCatalog(next, expectedHash) {
+    await atomicJson(this.dataPath, next, expectedHash);
     this.catalog = next;
     return this.view();
   }
