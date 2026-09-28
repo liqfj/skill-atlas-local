@@ -21,6 +21,7 @@
     <div class="sidebar-scroll">
     <nav aria-label="主要导航" class="main-nav">
       <button class="nav-item active" data-view="library" aria-current="page"><i data-lucide="library"></i><span>技能目录</span><span class="nav-count" id="navTotal">—</span></button>
+      <button class="nav-item" data-view="workbench"><i data-lucide="list-todo"></i><span>待处理</span><span class="nav-count" id="navPending">—</span></button>
       <button class="nav-item" data-view="packages"><i data-lucide="package"></i><span>技能包</span><span class="nav-count" id="navPackages">—</span></button>
       <button class="nav-item" data-view="history"><i data-lucide="history"></i><span>变化记录</span><span class="nav-count" id="navChanges">—</span></button>
       <button class="nav-item" data-view="sources"><i data-lucide="folder-open"></i><span>来源目录</span><span class="nav-count" id="navSources">—</span></button>
@@ -33,7 +34,7 @@
     </div>
     <div class="sidebar-bottom">
       <span class="local-indicator"><span class="status-dot"></span>本机 · 只读扫描</span>
-      <div class="sidebar-version"><span>Skill Atlas</span><span>v0.2</span></div>
+      <div class="sidebar-version"><span>Skill Atlas</span><span>v0.3</span></div>
     </div>
   </aside>
   <div class="app-shell">
@@ -52,6 +53,10 @@
         <button class="metric" data-quick="standalone"><span class="metric-label"><i data-lucide="file-code-2"></i>独立技能</span><span class="metric-bottom"><strong id="metricStandalone">—</strong><span class="metric-unit">个</span><span class="metric-accent accent-gold">未归包</span></span></button>
         <button class="metric" data-quick="packages"><span class="metric-label"><i data-lucide="folder-tree"></i>包内入口</span><span class="metric-bottom"><strong id="metricMembers">—</strong><span class="metric-unit">个</span><span class="metric-accent accent-blue">含主入口</span></span></button>
         <button class="metric" data-quick="all"><span class="metric-label"><i data-lucide="layers-2"></i>全部入口</span><span class="metric-bottom"><strong id="metricEntries">—</strong><span class="metric-unit">个</span><span class="metric-accent accent-neutral">磁盘存在</span></span></button>
+      </section>
+      <section id="workbenchView" class="view-section" hidden>
+        <div class="section-toolbar"><div class="section-title"><i data-lucide="list-todo"></i><h2>待处理线索</h2><span id="workbenchCount" class="result-count">—</span></div></div>
+        <div id="workbenchList" class="workbench-list"></div>
       </section>
       <section id="libraryView" class="view-section">
         <div class="filter-bar">
