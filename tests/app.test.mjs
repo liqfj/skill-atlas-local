@@ -496,7 +496,7 @@ test('HTTP API checks origin, host, token and exposes only registered documents'
   }
 });
 
-test('import preview accepts the existing export without writing local data', async context => {
+test('import preview validates the existing export without writing local data', async context => {
   const { store } = await fixture(context);
   const server = createApp(store, project);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -519,7 +519,8 @@ test('import preview accepts the existing export without writing local data', as
   assert.equal(result.packages, snapshot.packages.length);
   assert.equal(result.events, snapshot.events.length);
   assert.equal(result.configuredRoots, snapshot.configuredRoots.length);
-  assert.equal(result.applicable, false);
+  assert.equal(result.applicable, true);
+  assert.equal(typeof result.previewId, 'string');
   assert.equal(result.sourceRootsApplied, false);
   assert.equal(await fs.readFile(store.dataPath, 'utf8'), before);
   for (const invalidSnapshot of [
@@ -537,4 +538,292 @@ test('import preview accepts the existing export without writing local data', as
   }
   assert.equal(await fs.readFile(store.dataPath, 'utf8'), before);
   assert.equal((await fetch(`${base}/api/import/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 403);
+});
+
+test('import apply rejects a preview made before a local edit', async context => {
+  const { store } = await fixture(context);
+  const server = createApp(store, project);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  context.after(async () => {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const token = (await (await fetch(`${base}/api/catalog`)).json()).token;
+  const headers = { 'Content-Type': 'application/json', 'X-Catalog-Token': token };
+  const snapshot = await (await fetch(`${base}/api/export`)).json();
+  const preview = await (await fetch(`${base}/api/import/preview`, {
+    method: 'POST', headers, body: JSON.stringify({ snapshot }),
+  })).json();
+  assert.equal(typeof preview.previewId, 'string');
+  await store.updateSkill(snapshot.skills[0].id, { note: 'Edited after preview', customSummary: '' });
+  const afterEdit = await fs.readFile(store.dataPath, 'utf8');
+  const response = await fetch(`${base}/api/import/apply`, {
+    method: 'POST', headers, body: JSON.stringify({ previewId: preview.previewId, snapshot }),
+  });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error, 'IMPORT_STALE');
+  assert.equal(await fs.readFile(store.dataPath, 'utf8'), afterEdit);
+});
+
+test('import apply restores matching annotations, backs up data and keeps trusted paths', async context => {
+  const { directory, store } = await fixture(context);
+  const server = createApp(store, project);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  context.after(async () => {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const token = (await (await fetch(`${base}/api/catalog`)).json()).token;
+  const headers = { 'Content-Type': 'application/json', 'X-Catalog-Token': token };
+  const skillId = store.catalog.skills[0].id;
+  const canonicalPath = store.catalog.skills[0].canonicalPath;
+  await store.updateSkill(skillId, { note: 'Backup note', customSummary: 'Backup summary' });
+  const snapshot = await (await fetch(`${base}/api/export`)).json();
+  snapshot.skills[0].canonicalPath = path.join(directory, 'not-a-skill.md');
+  snapshot.skills[0].locations = [];
+  await store.updateSkill(skillId, { note: 'Current note', customSummary: 'Current summary' });
+  const before = await fs.readFile(store.dataPath, 'utf8');
+  const configBefore = JSON.stringify(store.config);
+  const previewResponse = await fetch(`${base}/api/import/preview`, {
+    method: 'POST', headers, body: JSON.stringify({ snapshot }),
+  });
+  assert.equal(previewResponse.status, 200);
+  const preview = await previewResponse.json();
+  assert.equal(preview.applicable, true);
+  const applied = await fetch(`${base}/api/import/apply`, {
+    method: 'POST', headers, body: JSON.stringify({ previewId: preview.previewId, snapshot }),
+  });
+  assert.equal(applied.status, 200);
+  const result = await applied.json();
+  assert.equal(result.skills[0].note, 'Backup note');
+  assert.equal(result.skills[0].customSummary, 'Backup summary');
+  assert.equal(result.skills[0].canonicalPath, canonicalPath);
+  assert.notEqual(await fs.readFile(store.dataPath, 'utf8'), before);
+  assert.equal(JSON.stringify(store.config), configBefore);
+  const backups = await fs.readdir(path.join(directory, 'data', 'backups'));
+  assert.equal(backups.length, 1);
+  assert.equal(result.backup, `data/backups/${backups[0]}`);
+  assert.equal(await fs.readFile(path.join(directory, 'data', 'backups', backups[0]), 'utf8'), before);
+  const restarted = await new CatalogStore(directory).initialize();
+  assert.equal(restarted.catalog.skills[0].note, 'Backup note');
+  assert.equal(restarted.catalog.skills[0].canonicalPath, canonicalPath);
+});
+
+test('import apply restores introductions, category rules, package categories and history', async context => {
+  const { directory, store, rootPath } = await fixture(context);
+  const group = await addBundle(store, rootPath);
+  const skill = store.view().skills.find(item => item.metadata.name === 'archify');
+  await store.updateIntroduction(skill.id, { text: '备份中的中文简介。', whenToUse: '恢复时使用。', sourceHash: skill.descriptionHash, revision: skill.introduction.revision });
+  const taxonomy = store.view().categories.map(category => category.id === 'research' ? { ...category, label: '备份分类' } : category);
+  await store.updateTaxonomy({ revision: store.catalog.taxonomyRevision, categories: taxonomy });
+  await store.setPackageCategory(group.id, { categoryId: 'research' });
+  const server = createApp(store, project);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  context.after(async () => {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const token = (await (await fetch(`${base}/api/catalog`)).json()).token;
+  const snapshot = await (await fetch(`${base}/api/export`)).json();
+  const headers = { 'Content-Type': 'application/json', 'X-Catalog-Token': token };
+  const current = store.view().skills.find(item => item.id === skill.id);
+  await store.updateIntroduction(skill.id, { text: '后续修订的中文简介。', whenToUse: '', sourceHash: current.descriptionHash, revision: current.introduction.revision });
+  await store.setPackageCategory(group.id, { categoryId: 'testing' });
+  await store.updateTaxonomy({ revision: store.catalog.taxonomyRevision, categories: store.view().categories.map(category => category.id === 'research' ? { ...category, label: '当前分类' } : category) });
+  const configBefore = JSON.stringify(store.config);
+  const preview = await (await fetch(`${base}/api/import/preview`, {
+    method: 'POST', headers, body: JSON.stringify({ snapshot }),
+  })).json();
+  assert.equal(preview.applicable, true);
+  const applied = await fetch(`${base}/api/import/apply`, {
+    method: 'POST', headers, body: JSON.stringify({ previewId: preview.previewId, snapshot }),
+  });
+  assert.equal(applied.status, 200);
+  const restarted = await new CatalogStore(directory).initialize();
+  const restored = restarted.view();
+  assert.equal(restored.skills.find(item => item.id === skill.id).introduction.text, '备份中的中文简介。');
+  assert.equal(restored.categories.find(category => category.id === 'research').label, '备份分类');
+  assert.equal(restored.packages.find(item => item.id === group.id).classification.categoryId, 'research');
+  assert.equal(restored.packages.find(item => item.id === group.id).classification.mode, 'manual');
+  assert.deepEqual(restored.events, snapshot.events);
+  assert.equal(JSON.stringify(restarted.config), configBefore);
+});
+
+test('import preview refuses missing skills and invalid history without changing the catalog', async context => {
+  const { store } = await fixture(context);
+  const server = createApp(store, project);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  context.after(async () => {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const token = (await (await fetch(`${base}/api/catalog`)).json()).token;
+  const snapshot = await (await fetch(`${base}/api/export`)).json();
+  const before = await fs.readFile(store.dataPath, 'utf8');
+  const headers = { 'Content-Type': 'application/json', 'X-Catalog-Token': token };
+  const mismatch = await fetch(`${base}/api/import/preview`, {
+    method: 'POST', headers, body: JSON.stringify({ snapshot: { ...snapshot, skills: [] } }),
+  });
+  assert.equal(mismatch.status, 200);
+  const unmatched = await mismatch.json();
+  assert.equal(unmatched.applicable, false);
+  assert.equal(unmatched.previewId, undefined);
+  const blocked = await fetch(`${base}/api/import/apply`, { method: 'POST', headers, body: JSON.stringify({ previewId: 'missing', snapshot }) });
+  assert.equal(blocked.status, 409);
+  assert.equal((await blocked.json()).error, 'IMPORT_STALE');
+  for (const invalidSnapshot of [
+    { ...snapshot, events: [{ ...snapshot.events[0], type: 'added" onmouseover="alert(1)' }] },
+    { ...snapshot, events: [{ ...snapshot.events[0], at: '2026-09-28" onmouseover="alert(1)' }] },
+    { ...snapshot, events: [{ ...snapshot.events[0], skillId: 'f'.repeat(24) }] },
+    { ...snapshot, packages: [{ id: 'pkg-' + 'a'.repeat(24), name: 'Invented', memberIds: [snapshot.skills[0].id, snapshot.skills[0].id], entrySkillId: null, classification: { categoryId: 'other', mode: 'manual' } }] },
+  ]) {
+    const response = await fetch(`${base}/api/import/preview`, { method: 'POST', headers, body: JSON.stringify({ snapshot: invalidSnapshot }) });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).error, 'INVALID_IMPORT');
+  }
+  assert.equal(await fs.readFile(store.dataPath, 'utf8'), before);
+});
+
+test('import apply is single-use and a failed backup leaves the original file intact', async context => {
+  const { directory, store } = await fixture(context);
+  const server = createApp(store, project);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  context.after(async () => {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const token = (await (await fetch(`${base}/api/catalog`)).json()).token;
+  const headers = { 'Content-Type': 'application/json', 'X-Catalog-Token': token };
+  const snapshot = await (await fetch(`${base}/api/export`)).json();
+  const preview = await (await fetch(`${base}/api/import/preview`, { method: 'POST', headers, body: JSON.stringify({ snapshot }) })).json();
+  const backupsPath = path.join(directory, 'data', 'backups');
+  await fs.writeFile(backupsPath, 'Not a directory');
+  const before = await fs.readFile(store.dataPath, 'utf8');
+  const apply = () => fetch(`${base}/api/import/apply`, { method: 'POST', headers, body: JSON.stringify({ previewId: preview.previewId, snapshot }) });
+  const failure = await apply();
+  assert.equal(failure.status, 500);
+  assert.equal(await fs.readFile(store.dataPath, 'utf8'), before);
+  await fs.rm(backupsPath);
+  const replay = await apply();
+  assert.equal(replay.status, 409);
+  assert.equal(await fs.readFile(store.dataPath, 'utf8'), before);
+});
+
+test('import restores a manual package without enabling source directories', async context => {
+  const { directory, store, rootPath } = await fixture(context);
+  await fs.mkdir(path.join(rootPath, 'helper'));
+  await fs.writeFile(path.join(rootPath, 'helper', 'SKILL.md'), '---\nname: helper\ndescription: An independent helper.\n---\n');
+  await store.scan();
+  const memberIds = store.view().skills.map(skill => skill.id);
+  await store.updatePackageStructure({ action: 'create', name: 'My saved package', memberIds, revision: store.view().structureRevision });
+  const group = store.view().packages.find(item => item.name === 'My saved package');
+  await store.setPackageCategory(group.id, { categoryId: 'research' });
+  const server = createApp(store, project);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  context.after(async () => {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const token = (await (await fetch(`${base}/api/catalog`)).json()).token;
+  const headers = { 'Content-Type': 'application/json', 'X-Catalog-Token': token };
+  const snapshot = await (await fetch(`${base}/api/export`)).json();
+  await store.updatePackageStructure({ action: 'suppress', id: group.id, revision: store.view().structureRevision });
+  const configBefore = JSON.stringify(store.config);
+  const preview = await (await fetch(`${base}/api/import/preview`, { method: 'POST', headers, body: JSON.stringify({ snapshot }) })).json();
+  assert.equal(preview.applicable, true);
+  const response = await fetch(`${base}/api/import/apply`, { method: 'POST', headers, body: JSON.stringify({ previewId: preview.previewId, snapshot }) });
+  assert.equal(response.status, 200);
+  const restarted = await new CatalogStore(directory).initialize();
+  assert.deepEqual(restarted.view().packages.find(item => item.id === group.id).memberIds.slice().sort(), memberIds.slice().sort());
+  assert.equal(restarted.view().packages.find(item => item.id === group.id).classification.categoryId, 'research');
+  assert.equal(JSON.stringify(restarted.config), configBefore);
+  assert.equal(restarted.view().configuredRoots.length, 1);
+});
+
+test('import apply rejects a disk change or different file after preview', async context => {
+  const { store } = await fixture(context);
+  const snapshot = store.view();
+  const preview = await store.previewImport({ snapshot });
+  await fs.appendFile(store.dataPath, ' ');
+  const editedBytes = await fs.readFile(store.dataPath, 'utf8');
+  await assert.rejects(store.applyImport({ previewId: preview.previewId, snapshot }), { code: 'IMPORT_STALE' });
+  assert.equal(await fs.readFile(store.dataPath, 'utf8'), editedBytes);
+  const nextPreview = await store.previewImport({ snapshot });
+  await assert.rejects(store.applyImport({ previewId: nextPreview.previewId, snapshot: { ...snapshot, events: [] } }), { code: 'IMPORT_STALE' });
+  assert.equal(await fs.readFile(store.dataPath, 'utf8'), editedBytes);
+});
+
+test('a failed import preview invalidates an earlier confirmation', async context => {
+  const { store } = await fixture(context);
+  const snapshot = store.view();
+  const preview = await store.previewImport({ snapshot });
+  await assert.rejects(store.previewImport({ snapshot: { ...snapshot, version: 2 } }), { code: 'INVALID_IMPORT' });
+  await assert.rejects(store.applyImport({ previewId: preview.previewId, snapshot }), { code: 'IMPORT_STALE' });
+});
+
+test('import apply requires the local token and rejects expired confirmations', async context => {
+  const { directory, store } = await fixture(context);
+  const server = createApp(store, project);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  context.after(async () => {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const snapshot = await (await fetch(`${base}/api/export`)).json();
+  const token = (await (await fetch(`${base}/api/catalog`)).json()).token;
+  const headers = { 'Content-Type': 'application/json', 'X-Catalog-Token': token };
+  const preview = await (await fetch(`${base}/api/import/preview`, { method: 'POST', headers, body: JSON.stringify({ snapshot }) })).json();
+  const body = JSON.stringify({ previewId: preview.previewId, snapshot });
+  const blocked = await fetch(`${base}/api/import/apply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+  assert.equal(blocked.status, 403);
+  assert.equal((await blocked.json()).error, 'TOKEN_REQUIRED');
+  const before = await fs.readFile(store.dataPath, 'utf8');
+  store.importDraft.expiresAt = Date.now() - 1;
+  const expired = await fetch(`${base}/api/import/apply`, { method: 'POST', headers, body });
+  assert.equal(expired.status, 409);
+  assert.equal((await expired.json()).error, 'IMPORT_STALE');
+  assert.equal(await fs.readFile(store.dataPath, 'utf8'), before);
+  await assert.rejects(fs.stat(path.join(directory, 'data', 'backups')), { code: 'ENOENT' });
+});
+
+test('import apply preserves an external disk edit made after the private backup', async context => {
+  const { store } = await fixture(context);
+  const snapshot = store.view();
+  const preview = await store.previewImport({ snapshot });
+  const before = await fs.readFile(store.dataPath, 'utf8');
+  const saveCatalog = store.saveCatalog.bind(store);
+  store.saveCatalog = async (next, expectedHash) => {
+    await fs.appendFile(store.dataPath, ' ');
+    return saveCatalog(next, expectedHash);
+  };
+  await assert.rejects(store.applyImport({ previewId: preview.previewId, snapshot }), { code: 'IMPORT_STALE' });
+  assert.equal(await fs.readFile(store.dataPath, 'utf8'), `${before} `);
+  assert.equal(store.catalog.skills[0].note, snapshot.skills[0].note);
+});
+
+test('import apply without the previewed file rejects without writing', async context => {
+  const { store } = await fixture(context);
+  const server = createApp(store, project);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  context.after(async () => {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const token = (await (await fetch(`${base}/api/catalog`)).json()).token;
+  const headers = { 'Content-Type': 'application/json', 'X-Catalog-Token': token };
+  const snapshot = await (await fetch(`${base}/api/export`)).json();
+  const preview = await (await fetch(`${base}/api/import/preview`, { method: 'POST', headers, body: JSON.stringify({ snapshot }) })).json();
+  const before = await fs.readFile(store.dataPath, 'utf8');
+  const response = await fetch(`${base}/api/import/apply`, { method: 'POST', headers, body: JSON.stringify({ previewId: preview.previewId }) });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error, 'IMPORT_STALE');
+  assert.equal(await fs.readFile(store.dataPath, 'utf8'), before);
 });

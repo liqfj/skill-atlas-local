@@ -115,9 +115,10 @@
     <header class="modal-header"><h2 id="importDialogTitle">备份内容预览</h2><button type="button" id="closeImport" class="icon-button" aria-label="关闭备份预览"><i data-lucide="x"></i></button></header>
     <p id="importFilename" class="editor-status"></p>
     <p id="importSummary" class="import-summary" role="status"></p>
-    <p class="merge-description">仅供核对，未写入当前目录；来源目录与设置保持不变。当前版本尚不能应用恢复。</p>
+    <p id="importGuidance" class="merge-description">预览不会修改当前目录。</p>
+    <label class="checkbox-field import-confirmation" id="importConfirmation" hidden><input type="checkbox" id="confirmImport">确认以此备份替换当前的笔记、中文修订、分类、技能包和变化记录；原目录会先保存私有备份。</label>
     <p id="importError" class="form-error" role="alert" hidden></p>
-    <div class="modal-actions"><button type="button" id="dismissImport" class="button button-secondary">关闭</button></div>
+    <div class="modal-actions"><button type="button" id="dismissImport" class="button button-secondary">关闭</button><button type="button" id="applyImportButton" class="button button-primary" hidden disabled><i data-lucide="database-backup"></i>确认恢复</button></div>
   </dialog>
   <dialog class="source-dialog category-dialog" id="categoryDialog" aria-labelledby="categoryDialogTitle">
     <form id="categoryForm"><header class="modal-header"><h2 id="categoryDialogTitle">编辑分类</h2><button type="button" class="icon-button" data-close-dialog="categoryDialog" aria-label="关闭分类编辑"><i data-lucide="x"></i></button></header><label class="form-field"><span>分类名称</span><input id="categoryName" required maxlength="40"></label><label class="form-field"><span>图标</span><select id="categoryIcon"></select></label><label class="form-field"><span>关键词</span><textarea id="categoryKeywords" rows="4" placeholder="research&#10;研究"></textarea></label><label class="form-field"><span>精确技能名称</span><textarea id="categoryNames" rows="4" placeholder="archify&#10;understand"></textarea></label><p id="categoryError" class="form-error" role="alert" hidden></p><div class="modal-actions"><button type="button" class="button button-secondary" data-close-dialog="categoryDialog">取消</button><button type="submit" class="button button-primary" id="saveCategory"><i data-lucide="save"></i>保存分类</button></div></form>
