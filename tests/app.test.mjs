@@ -567,7 +567,7 @@ test('import apply rejects a preview made before a local edit', async context =>
 });
 
 test('import apply restores matching annotations, backs up data and keeps trusted paths', async context => {
-  const { directory, store, rootPath } = await fixture(context);
+  const { directory, store } = await fixture(context);
   const server = createApp(store, project);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   context.after(async () => {
@@ -578,6 +578,7 @@ test('import apply restores matching annotations, backs up data and keeps truste
   const token = (await (await fetch(`${base}/api/catalog`)).json()).token;
   const headers = { 'Content-Type': 'application/json', 'X-Catalog-Token': token };
   const skillId = store.catalog.skills[0].id;
+  const canonicalPath = store.catalog.skills[0].canonicalPath;
   await store.updateSkill(skillId, { note: 'Backup note', customSummary: 'Backup summary' });
   const snapshot = await (await fetch(`${base}/api/export`)).json();
   snapshot.skills[0].canonicalPath = path.join(directory, 'not-a-skill.md');
@@ -598,7 +599,7 @@ test('import apply restores matching annotations, backs up data and keeps truste
   const result = await applied.json();
   assert.equal(result.skills[0].note, 'Backup note');
   assert.equal(result.skills[0].customSummary, 'Backup summary');
-  assert.equal(result.skills[0].canonicalPath, path.join(rootPath, 'archify', 'SKILL.md'));
+  assert.equal(result.skills[0].canonicalPath, canonicalPath);
   assert.notEqual(await fs.readFile(store.dataPath, 'utf8'), before);
   assert.equal(JSON.stringify(store.config), configBefore);
   const backups = await fs.readdir(path.join(directory, 'data', 'backups'));
@@ -607,7 +608,7 @@ test('import apply restores matching annotations, backs up data and keeps truste
   assert.equal(await fs.readFile(path.join(directory, 'data', 'backups', backups[0]), 'utf8'), before);
   const restarted = await new CatalogStore(directory).initialize();
   assert.equal(restarted.catalog.skills[0].note, 'Backup note');
-  assert.equal(restarted.catalog.skills[0].canonicalPath, path.join(rootPath, 'archify', 'SKILL.md'));
+  assert.equal(restarted.catalog.skills[0].canonicalPath, canonicalPath);
 });
 
 test('import apply restores introductions, category rules, package categories and history', async context => {
