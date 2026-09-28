@@ -45,7 +45,7 @@
       <div class="connection-error" id="connectionError" role="alert" hidden><i data-lucide="wifi-off"></i><span>无法连接本地服务</span><button id="retryConnection" class="text-button">重试</button></div>
       <section class="page-heading">
         <div><div class="eyebrow" id="pageEyebrow">YOUR LOCAL TOOLKIT</div><h1 id="pageTitle">技能目录</h1><p class="heading-meta" id="pageMeta">正在读取本地目录…</p></div>
-        <div class="heading-actions"><a href="/api/export" download="skill-atlas.json" class="icon-button export-button" title="导出目录 JSON" aria-label="导出目录 JSON"><i data-lucide="download"></i></a><button id="scanButton" class="button button-primary"><i data-lucide="refresh-cw" id="scanIcon"></i><span id="scanLabel">扫描更新</span></button></div>
+        <div class="heading-actions"><a href="/api/export" download="skill-atlas.json" class="icon-button export-button" title="导出目录 JSON" aria-label="导出目录 JSON"><i data-lucide="download"></i></a><button type="button" id="previewImportButton" class="icon-button export-button" title="预览备份 JSON" aria-label="预览备份 JSON" hidden><i data-lucide="file-up"></i></button><input type="file" id="importFile" accept=".json,application/json" hidden><button id="scanButton" class="button button-primary"><i data-lucide="refresh-cw" id="scanIcon"></i><span id="scanLabel">扫描更新</span></button></div>
       </section>
       <section class="metrics" id="catalogMetrics" aria-label="技能库概况">
         <button class="metric" data-quick="packages"><span class="metric-label"><i data-lucide="package"></i>技能包</span><span class="metric-bottom"><strong id="metricPackages">—</strong><span class="metric-unit">个</span><span class="metric-accent accent-green">整体管理</span></span></button>
@@ -110,6 +110,14 @@
 
   <dialog class="source-dialog" id="sourceDialog" aria-labelledby="sourceDialogTitle">
     <form id="sourceForm"><header class="modal-header"><h2 id="sourceDialogTitle">添加来源目录</h2><button type="button" id="closeSource" class="icon-button" aria-label="关闭添加目录"><i data-lucide="x"></i></button></header><label class="form-field"><span>来源名称</span><input id="sourceName" name="label" maxlength="100" required placeholder="例如 Claude Code"></label><label class="form-field"><span>目录路径</span><input id="sourcePath" name="path" maxlength="2000" required placeholder="~/.claude/skills" spellcheck="false"></label><label class="form-field"><span>作用范围</span><select id="sourceKind" name="kind"><option value="personal">个人目录</option><option value="shared">共享目录</option><option value="project">项目目录</option><option value="builtin">软件内置</option></select></label><p id="sourceError" class="form-error" role="alert" hidden></p><div class="modal-actions"><button type="button" id="cancelSource" class="button button-secondary">取消</button><button type="submit" class="button button-primary" id="submitSource"><i data-lucide="plus"></i>添加并扫描</button></div></form>
+  </dialog>
+  <dialog class="source-dialog" id="importDialog" aria-labelledby="importDialogTitle">
+    <header class="modal-header"><h2 id="importDialogTitle">备份内容预览</h2><button type="button" id="closeImport" class="icon-button" aria-label="关闭备份预览"><i data-lucide="x"></i></button></header>
+    <p id="importFilename" class="editor-status"></p>
+    <p id="importSummary" class="import-summary" role="status"></p>
+    <p class="merge-description">仅供核对，未写入当前目录；来源目录与设置保持不变。当前版本尚不能应用恢复。</p>
+    <p id="importError" class="form-error" role="alert" hidden></p>
+    <div class="modal-actions"><button type="button" id="dismissImport" class="button button-secondary">关闭</button></div>
   </dialog>
   <dialog class="source-dialog category-dialog" id="categoryDialog" aria-labelledby="categoryDialogTitle">
     <form id="categoryForm"><header class="modal-header"><h2 id="categoryDialogTitle">编辑分类</h2><button type="button" class="icon-button" data-close-dialog="categoryDialog" aria-label="关闭分类编辑"><i data-lucide="x"></i></button></header><label class="form-field"><span>分类名称</span><input id="categoryName" required maxlength="40"></label><label class="form-field"><span>图标</span><select id="categoryIcon"></select></label><label class="form-field"><span>关键词</span><textarea id="categoryKeywords" rows="4" placeholder="research&#10;研究"></textarea></label><label class="form-field"><span>精确技能名称</span><textarea id="categoryNames" rows="4" placeholder="archify&#10;understand"></textarea></label><p id="categoryError" class="form-error" role="alert" hidden></p><div class="modal-actions"><button type="button" class="button button-secondary" data-close-dialog="categoryDialog">取消</button><button type="submit" class="button button-primary" id="saveCategory"><i data-lucide="save"></i>保存分类</button></div></form>
