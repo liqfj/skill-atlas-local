@@ -443,6 +443,7 @@ test('HTTP API checks origin, host, token and exposes only registered documents'
   assert.match(bootstrap.headers.get('content-security-policy'), /frame-ancestors 'none'/);
   const initial = await bootstrap.json();
   assert.equal(initial.skills.length, 1);
+  assert.equal(initial.features.importPreview, true);
   assert.equal(initial.skills[0].summarySource, 'preset');
   assert.equal((await fetch(`${base}/api/catalog`, { headers: { Origin: 'https://untrusted.example' } })).status, 403);
   const invalidHostStatus = await new Promise((resolve, reject) => {
@@ -493,4 +494,47 @@ test('HTTP API checks origin, host, token and exposes only registered documents'
   for (const resource of ['/', '/app.js', '/style.css', '/vendor/lucide.js', '/assets/catalog-mark.svg']) {
     assert.equal((await fetch(`${base}${resource}`)).status, 200, resource);
   }
+});
+
+test('import preview accepts the existing export without writing local data', async context => {
+  const { store } = await fixture(context);
+  const server = createApp(store, project);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  context.after(async () => {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const token = (await (await fetch(`${base}/api/catalog`)).json()).token;
+  const snapshot = await (await fetch(`${base}/api/export`)).json();
+  const before = await fs.readFile(store.dataPath, 'utf8');
+  const headers = { 'Content-Type': 'application/json', 'X-Catalog-Token': token };
+  const preview = await fetch(`${base}/api/import/preview`, {
+    method: 'POST', headers, body: `${JSON.stringify({ snapshot })}${' '.repeat(32768)}`,
+  });
+  assert.equal(preview.status, 200);
+  const result = await preview.json();
+  assert.equal(result.version, 1);
+  assert.equal(result.skills, snapshot.skills.length);
+  assert.equal(result.packages, snapshot.packages.length);
+  assert.equal(result.events, snapshot.events.length);
+  assert.equal(result.configuredRoots, snapshot.configuredRoots.length);
+  assert.equal(result.applicable, false);
+  assert.equal(result.sourceRootsApplied, false);
+  assert.equal(await fs.readFile(store.dataPath, 'utf8'), before);
+  for (const invalidSnapshot of [
+    { ...snapshot, version: 2 },
+    { ...snapshot, skills: [{ id: snapshot.skills[0].id }] },
+    { ...snapshot, skills: [snapshot.skills[0], snapshot.skills[0]] },
+    { ...snapshot, events: [null] },
+    { ...snapshot, taxonomy: [] },
+  ]) {
+    const invalid = await fetch(`${base}/api/import/preview`, {
+      method: 'POST', headers, body: JSON.stringify({ snapshot: invalidSnapshot }),
+    });
+    assert.equal(invalid.status, 400);
+    assert.equal((await invalid.json()).error, 'INVALID_IMPORT');
+  }
+  assert.equal(await fs.readFile(store.dataPath, 'utf8'), before);
+  assert.equal((await fetch(`${base}/api/import/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 403);
 });

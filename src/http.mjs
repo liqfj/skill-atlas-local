@@ -16,13 +16,13 @@ const staticFiles = new Map([
 
 const brandMark = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#246b59" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${icons.LibraryBig.map(([tag, attributes]) => `<${tag} ${Object.entries(attributes).map(([name, value]) => `${name}="${value}"`).join(' ')}/>`).join('')}</svg>`;
 
-async function bodyJson(request) {
+async function bodyJson(request, maxLength = 32768) {
   if (!request.headers['content-type']?.startsWith('application/json')) throw new AppError('JSON_REQUIRED', 415);
   const chunks = [];
   let length = 0;
   for await (const chunk of request) {
     length += chunk.length;
-    if (length > 32768) throw new AppError('BODY_TOO_LARGE', 413);
+    if (length > maxLength) throw new AppError('BODY_TOO_LARGE', 413);
     chunks.push(chunk);
   }
   try {
@@ -61,9 +61,10 @@ export function createApp(store, directory) {
         const supplied = Buffer.from(request.headers['x-catalog-token'] ?? '');
         if (supplied.length !== tokenBytes.length || !timingSafeEqual(supplied, tokenBytes)) throw new AppError('TOKEN_REQUIRED', 403);
       }
-      if (request.method === 'GET' && url.pathname === '/api/catalog') return json({ ...store.view(), token });
+      if (request.method === 'GET' && url.pathname === '/api/catalog') return json({ ...store.view(), token, features: { importPreview: true } });
       if (request.method === 'GET' && url.pathname === '/api/candidates') return json(await store.candidates());
       if (request.method === 'GET' && url.pathname === '/api/export') return json(store.view(), 200, { 'Content-Disposition': 'attachment; filename="skill-atlas.json"' });
+      if (request.method === 'POST' && url.pathname === '/api/import/preview') return json(store.previewImport(await bodyJson(request, 16 * 1024 * 1024)));
       if (request.method === 'POST' && url.pathname === '/api/scan') {
         await bodyJson(request);
         return json(await store.scan());

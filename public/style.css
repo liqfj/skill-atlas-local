@@ -93,6 +93,7 @@ h1 { overflow-wrap: anywhere; }
 .icon-button { display: inline-grid; place-items: center; width: 34px; height: 34px; padding: 0; border-radius: 5px; flex-shrink: 0; color: #7d868d; }
 .icon-button:hover { background: #edf0f0; color: #2b4d43; }
 .export-button { height: 38px; width: 38px; border: 1px solid var(--line); background: white; }
+.heading-actions [hidden] { display: none; }
 .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 20px 0 23px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin-bottom: 29px; }
 .metric { padding: 0 22px; border-right: 1px solid var(--line); text-align: left; min-width: 0; }
 .metric:first-child { padding-left: 0; }
@@ -303,6 +304,8 @@ dialog::backdrop { background: #17241e35; backdrop-filter: blur(2px); }
 .modal-header h2 { font-size: 17px; font-weight: 500; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 30px; }
 .form-error { color: #b57961; background: #fbf4ed; padding: 10px; font-size: 11px; line-height: 1.7; border-radius: 4px; }
+.import-summary { min-height: 28px; margin-bottom: 14px; font-size: 13px; line-height: 1.7; color: var(--ink); overflow-wrap: anywhere; }
+#importFilename { margin-bottom: 12px; overflow-wrap: anywhere; }
 .toast { position: fixed; left: calc(50% + 100px); bottom: 30px; transform: translateX(-50%); border: 1px solid #d6e2d9; background: #f6faf7; box-shadow: 0 5px 30px #1b3e2a14; color: #4f745e; padding: 13px 20px; border-radius: 6px; max-width: calc(100% - 36px); font-size: 12px; z-index: 100; line-height: 1.7; text-align: center; }
 .toast.error { color: #a16752; background: #fff9f5; border-color: #e6d7cf; }
 .connection-error { display: flex; gap: 10px; align-items: center; background: #fdf3ed; color: #b37d61; padding: 12px; border-radius: 5px; font-size: 12px; margin-bottom: 20px; }
@@ -455,7 +458,6 @@ dialog::backdrop { background: #17241e35; backdrop-filter: blur(2px); }
   .skill-category, .table-header .category-column { display: none; }
   .scan-stamp { display: none; }
   .heading-actions { gap: 7px; }
-  .export-button { display: none; }
 }
 @media (max-width: 700px) {
   .list-heading { flex-wrap: wrap; }
@@ -492,7 +494,8 @@ dialog::backdrop { background: #17241e35; backdrop-filter: blur(2px); }
   h1 { font-size: 25px; }
   .eyebrow { font-size: 9px; margin-bottom: 8px; }
   .heading-meta { font-size: 10px; margin-top: 7px; }
-  .page-heading { margin-bottom: 22px; gap: 12px; }
+  .page-heading { margin-bottom: 22px; gap: 12px; flex-wrap: wrap; }
+  .heading-actions { width: 100%; justify-content: flex-end; }
   .heading-actions .button { padding: 0 11px; height: 35px; font-size: 11px; gap: 6px; }
   .metrics { padding: 20px 0; gap: 22px 0; margin-bottom: 22px; }
   .metric { padding: 0 17px; }

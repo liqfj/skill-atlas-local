@@ -140,6 +140,20 @@ export class CatalogStore {
 
   view() { return presentCatalog(this.catalog, this.config); }
 
+  previewImport(values) {
+    const snapshot = values?.snapshot;
+    if (snapshot?.version !== 1 || !Array.isArray(snapshot.skills) || !Array.isArray(snapshot.events) || !Array.isArray(snapshot.packages) || !Array.isArray(snapshot.taxonomy) || !Array.isArray(snapshot.configuredRoots)) throw new AppError('INVALID_IMPORT');
+    const ids = new Set();
+    for (const skill of snapshot.skills) {
+      if (!skill || !/^[a-f0-9]{24}$/.test(skill.id) || ids.has(skill.id) || typeof skill.metadata?.name !== 'string' || typeof skill.note !== 'string' || skill.note.length > 8000 || typeof skill.customSummary !== 'string' || skill.customSummary.length > 1000) throw new AppError('INVALID_IMPORT');
+      ids.add(skill.id);
+    }
+    if (snapshot.events.some(event => !event || typeof event.id !== 'string')) throw new AppError('INVALID_IMPORT');
+    try { validateTaxonomy(snapshot.taxonomy); }
+    catch { throw new AppError('INVALID_IMPORT'); }
+    return { version: 1, skills: snapshot.skills.length, packages: snapshot.packages.length, events: snapshot.events.length, configuredRoots: snapshot.configuredRoots.length, applicable: false, sourceRootsApplied: false };
+  }
+
   async saveCatalog(next) {
     await atomicJson(this.dataPath, next);
     this.catalog = next;

@@ -4,6 +4,7 @@ const icon = (name, className = '') => `<i data-lucide="${name}"${className ? ` 
 const state = { data: null, token: '', view: 'library', category: '', query: '', source: '', status: '', sort: 'name', recent: false, page: 1, pageSize: 20, eventType: '', historyLimit: 50, scanning: false, detailId: null, detailRevision: 0, noteDirty: false, introductionDirty: false, categoryDirty: false, detailTab: 'overview', managementBusy: false, categoryEdit: null, mergeEdit: null, preview: null, previewSequence: 0, candidates: [], candidatesLoaded: false };
 Object.assign(state, { kind: '', packageId: null, packageQuery: '', packageEdit: null, packageDraft: null, packageCategoryDirty: false, packageCategoryValue: '' });
 Object.assign(state, { document: null, documentMode: 'preview', documentLoading: false, documentError: '' });
+state.importSequence = 0;
 const categoryNames = new Map();
 const statusLabels = { present: '已发现', missing: '路径缺失', unknown: '待确认' };
 const eventLabels = { added: '新增发现', updated: '内容更新', missing: '路径缺失', restored: '重新发现', classified: '分类调整', packaged: '包归属调整' };
@@ -29,6 +30,7 @@ const errors = {
   PACKAGE_CATEGORY_REQUIRED: '该技能属于技能包，请调整整包分类。', PACKAGE_STRUCTURE_CONFLICT: '包结构已变化，请重新打开分组编辑并预览。',
   INVALID_PACKAGE: '请检查技能包名称和操作。', INVALID_PACKAGE_MEMBERS: '请至少选择两个不同的成员。',
   PACKAGE_MEMBERS_CONFLICT: '成员已有包归属或待确认分组，请先处理原分组，不能同时归入两个包。',
+  INVALID_IMPORT: '不是受支持的目录导出，或文件内容不完整。', INVALID_JSON: '无法解析 JSON 文件。', BODY_TOO_LARGE: '备份文件不能超过 16 MiB。',
 };
 let toastTimer;
 let loadSequence = 0;
@@ -75,6 +77,7 @@ function connection(online) {
 function accept(data) {
   state.data = data;
   if (data.token) state.token = data.token;
+  get('previewImportButton').hidden = data.features?.importPreview !== true;
   categoryNames.clear();
   data.categories.forEach(category => categoryNames.set(category.id, category.label));
   if (state.category && !categoryNames.has(state.category)) state.category = '';
@@ -626,6 +629,35 @@ get('recentChip').addEventListener('click', () => { state.recent = false; render
 for (const [id, key] of [['sourceFilter', 'source'], ['statusFilter', 'status'], ['sortSelect', 'sort']]) get(id).addEventListener('change', event => { state[key] = event.target.value; state.page = 1; if (state.data) renderLibrary(); });
 get('eventFilter').addEventListener('change', event => { state.eventType = event.target.value; state.historyLimit = 50; renderHistory(); });
 get('scanButton').addEventListener('click', () => scan());
+get('previewImportButton').addEventListener('click', () => get('importFile').click());
+get('importFile').addEventListener('change', async event => {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+  const sequence = ++state.importSequence;
+  const dialog = get('importDialog');
+  get('importFilename').textContent = file.name;
+  get('importSummary').textContent = '正在读取文件…';
+  get('importError').hidden = true;
+  dialog.showModal();
+  try {
+    if (file.size > 16 * 1024 * 1024 - 128) throw new Error(errors.BODY_TOO_LARGE);
+    let snapshot;
+    try { snapshot = JSON.parse(await file.text()); }
+    catch { throw new Error(errors.INVALID_JSON); }
+    const preview = await request('/api/import/preview', { method: 'POST', body: JSON.stringify({ snapshot }) });
+    if (sequence !== state.importSequence || !dialog.open) return;
+    if (preview.applicable !== false || preview.sourceRootsApplied !== false) throw new Error(errors.INVALID_IMPORT);
+    get('importSummary').textContent = `${preview.skills} 个技能 · ${preview.packages} 个技能包 · ${preview.events} 条变化 · ${preview.configuredRoots} 个来源（未导入）`;
+  } catch (error) {
+    if (sequence !== state.importSequence || !dialog.open) return;
+    get('importSummary').textContent = '';
+    get('importError').textContent = error.message;
+    get('importError').hidden = false;
+  }
+});
+get('importDialog').addEventListener('close', () => { state.importSequence += 1; });
+for (const id of ['closeImport', 'dismissImport']) get(id).addEventListener('click', () => get('importDialog').close());
 get('retryConnection').addEventListener('click', () => refresh(true));
 get('closeDetail').addEventListener('click', closeDetail);
 get('detailDialog').addEventListener('cancel', event => { event.preventDefault(); closeDetail(); });
