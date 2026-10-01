@@ -60,7 +60,7 @@
     "docs/preview.png"
   ],
   "dependencies": {
-    "lucide": "1.47.0",
+    "lucide": "1.48.0",
     "marked": "18.0.14",
     "sanitize-html": "2.17.7",
     "yaml": "2.9.1"
