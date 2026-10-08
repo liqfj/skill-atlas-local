@@ -62,7 +62,7 @@
   "dependencies": {
     "lucide": "1.47.0",
     "marked": "18.0.14",
-    "sanitize-html": "2.17.7",
+    "sanitize-html": "2.18.0",
     "yaml": "2.9.1"
   },
   "devDependencies": {
